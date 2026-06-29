@@ -76,6 +76,7 @@ const GLOBAL_CSS = `
   @keyframes shimmerInk { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
   @keyframes brushBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
   @keyframes splashOverlayIn { 0% { transform: scale(0.1); opacity: 0; } 20% { opacity: 1; } 60% { transform: scale(1.6); opacity: 0.85; } 100% { transform: scale(2.8); opacity: 0; } }
+  @keyframes liquidPop { 0% { transform: scale(0.05) rotate(-8deg); opacity: 0; filter: blur(8px); } 18% { opacity: 1; filter: blur(2px); } 45% { transform: scale(1.1) rotate(3deg); opacity: 1; filter: blur(0px); } 70% { transform: scale(1.4) rotate(-2deg); opacity: 0.7; } 100% { transform: scale(2.2) rotate(1deg); opacity: 0; filter: blur(4px); } }
   @keyframes popIn { 0% { transform: scale(0.85); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
 
   .animate-fadeUp { animation: fadeUp 0.4s ease forwards; }
@@ -245,27 +246,33 @@ function FullscreenInkLoader() {
 
 /* A short burst through the same frame set, scaled up and fading out — used
    as the "you've arrived" punctuation when jumping to a quoted page. */
-function SplashArrivalOverlay({ onDone }) {
+function SplashArrivalOverlay({ onDone, bgColor = "#0A0A0A" }) {
   const frame = useSplashFrame(ASSET_SPLASH_FRAMES.length, true);
+  const isLight = bgColor === "#f5f5f0" || bgColor === "#e8e0d0";
   useEffect(() => {
-    const t = setTimeout(() => onDone?.(), 900);
+    const t = setTimeout(() => onDone?.(), 1100);
     return () => clearTimeout(t);
   }, [onDone]);
   return (
-    <div className="splash-arrival">
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 9999,
+      pointerEvents: "none",
+      display: "flex", alignItems: "center", justifyContent: "center",
+    }}>
       <div style={{
-        animation: "splashOverlayIn 0.85s cubic-bezier(.2,.85,.3,1) forwards",
+        animation: "liquidPop 1.05s cubic-bezier(.15,.85,.25,1) forwards",
         display: "flex", alignItems: "center", justifyContent: "center",
-        pointerEvents: "none",
       }}>
         <img
           src={ASSET_SPLASH_FRAMES[frame]}
           alt=""
-          width={260}
-          height={260}
+          width={320}
+          height={320}
           style={{
-            filter: "invert(0) brightness(1.5) contrast(1.2)",
-            mixBlendMode: "multiply",
+            filter: isLight
+              ? "invert(0) brightness(0.15) contrast(1.5)"
+              : "invert(1) brightness(2.2) contrast(1.1)",
+            mixBlendMode: isLight ? "multiply" : "screen",
             display: "block",
           }}
         />
@@ -811,7 +818,7 @@ function ReaderPage({readerState,setReaderState,toast,setView,onUpdateChapterCom
             <div key={page.id} ref={el=>pageRefs.current[i]=el} style={{position:"relative"}}>
               <LazyImg src={page.image} alt={`Page ${i+1}`} style={{width:"100%",aspectRatio:"2/3",display:"block"}}/>
               {arrivalKey === String(i) && (
-                <SplashArrivalOverlay key={arrivalKey} onDone={()=>setArrivalKey(null)} />
+                <SplashArrivalOverlay key={arrivalKey} onDone={()=>setArrivalKey(null)} bgColor={bgColor} />
               )}
             </div>
           ))}
