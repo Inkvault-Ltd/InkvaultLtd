@@ -715,21 +715,6 @@ function ReaderPage({readerState,setReaderState,toast,setView,onUpdateChapterCom
   const [showComments,setShowComments]=useState(!!openComments);
   const [pendingQuote,setPendingQuote]=useState(null);
   const [arrivalKey,setArrivalKey]=useState(null);
-  const [pendingJump,setPendingJump]=useState(null);
-
-  useEffect(()=>{
-    if(pendingJump==null)return;
-    const t=setTimeout(()=>{
-      const target=pageRefs.current[pendingJump];
-      if(target){
-        target.scrollIntoView({block:"center",behavior:"smooth"});
-        setArrivalKey(pendingJump+"-"+Date.now());
-        setPendingJump(null);
-      }
-    },350);
-    return()=>clearTimeout(t);
-  },[pendingJump]);
-
   useEffect(()=>{
     const el=containerRef.current; if(!el) return;
     const onScroll=()=>{
@@ -759,36 +744,10 @@ function ReaderPage({readerState,setReaderState,toast,setView,onUpdateChapterCom
     toast(`Page ${currentPage+1} tagged`, "success");
   };
 
-  const [pendingJump, setPendingJump] = useState(null);
-  useEffect(() => {
-    if (pendingJump == null) return;
-    const t = setTimeout(() => {
-      const target = pageRefs.current[pendingJump];
-      if (target) {
-        target.scrollIntoView({block:"center", behavior:"smooth"});
-        setArrivalKey(pendingJump + "-" + Date.now());
-        setPendingJump(null);
-      }
-    }, 350);
-    return () => clearTimeout(t);
-  }, [pendingJump]);
-
   const handleJumpFromComment = (pageIndex) => {
     setShowComments(false);
     setPendingJump(pageIndex);
   };
-  useEffect(()=>{
-    if(pendingJump==null)return;
-    const t=setTimeout(()=>{
-      const target=pageRefs.current[pendingJump];
-      if(target){
-        target.scrollIntoView({block:"center",behavior:"smooth"});
-        setArrivalKey(pendingJump+"-"+Date.now());
-        setPendingJump(null);
-      }
-    },350);
-    return()=>clearTimeout(t);
-  },[pendingJump]);
 
   return (
     <div style={{position:"fixed",inset:0,background:bgColor,display:"flex",flexDirection:"column",zIndex:500}}>
