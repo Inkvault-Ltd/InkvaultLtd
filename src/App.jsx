@@ -75,8 +75,7 @@ const GLOBAL_CSS = `
   @keyframes drip { 0% { height: 0; opacity: 0.8; } 100% { height: var(--drip-h, 18px); opacity: 0; } }
   @keyframes shimmerInk { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
   @keyframes brushBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
-  @keyframes splashOverlayIn { 0% { transform: scale(0.1); opacity: 0; } 20% { opacity: 1; } 60% { transform: scale(1.6); opacity: 0.85; } 100% { transform: scale(2.8); opacity: 0; } }
-  @keyframes liquidPop { 0% { transform: scale(0.05) rotate(-8deg); opacity: 0; filter: blur(8px); } 18% { opacity: 1; filter: blur(2px); } 45% { transform: scale(1.1) rotate(3deg); opacity: 1; filter: blur(0px); } 70% { transform: scale(1.4) rotate(-2deg); opacity: 0.7; } 100% { transform: scale(2.2) rotate(1deg); opacity: 0; filter: blur(4px); } }
+  @keyframes splashOverlayIn { 0% { transform: scale(0); opacity: 0.95; } 55% { transform: scale(1.4); opacity: 0.9; } 100% { transform: scale(2.2); opacity: 0; } }
   @keyframes popIn { 0% { transform: scale(0.85); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
 
   .animate-fadeUp { animation: fadeUp 0.4s ease forwards; }
@@ -195,7 +194,7 @@ const GLOBAL_CSS = `
   @media (min-width: 768px) { .quote-fab { bottom: 28px; } }
 
   /* ---- ink splash arrival overlay (plays over a jumped-to page) ---- */
-  .splash-arrival { position: absolute; inset: 0; pointer-events: none; display: flex; align-items: center; justify-content: center; z-index: 10; overflow: hidden; }
+  .splash-arrival { position: absolute; inset: 0; pointer-events: none; display: flex; align-items: center; justify-content: center; z-index: 5; }
 `;
 
 /* ============================================================================
@@ -246,37 +245,16 @@ function FullscreenInkLoader() {
 
 /* A short burst through the same frame set, scaled up and fading out — used
    as the "you've arrived" punctuation when jumping to a quoted page. */
-function SplashArrivalOverlay({ onDone, bgColor = "#0A0A0A" }) {
+function SplashArrivalOverlay({ onDone }) {
   const frame = useSplashFrame(ASSET_SPLASH_FRAMES.length, true);
-  const isLight = bgColor === "#f5f5f0" || bgColor === "#e8e0d0";
   useEffect(() => {
-    const t = setTimeout(() => onDone?.(), 1100);
+    const t = setTimeout(() => onDone?.(), 850);
     return () => clearTimeout(t);
   }, [onDone]);
   return (
-    <div style={{
-      position: "fixed", inset: 0, zIndex: 9999,
-      pointerEvents: "none",
-      display: "flex", alignItems: "center", justifyContent: "center",
-    }}>
-      <div style={{
-        animation: "liquidPop 1.05s cubic-bezier(.15,.85,.25,1) forwards",
-        display: "flex", alignItems: "center", justifyContent: "center",
-      }}>
-        <img
-          src={ASSET_SPLASH_FRAMES[frame]}
-          alt=""
-          width={320}
-          height={320}
-          style={{
-            filter: isLight
-              ? "invert(0) brightness(0.15) contrast(1.5)"
-              : "invert(1) brightness(2.2) contrast(1.1)",
-            mixBlendMode: isLight ? "multiply" : "screen",
-            display: "block",
-          }}
-        />
-      </div>
+    <div className="splash-arrival">
+      <img src={ASSET_SPLASH_FRAMES[frame]} alt="" width={220} height={220}
+        style={{ animation: "splashOverlayIn 0.8s cubic-bezier(.2,.85,.3,1) forwards" }} />
     </div>
   );
 }
@@ -629,21 +607,46 @@ function DetailPage({manga,setManga,bookmarks,setBookmarks,toast,setView,setRead
 function ChapterComments({chapter, mangaId, onUpdateComments, user, toast, pendingQuote, onConsumeQuote, onJumpToPage}) {
   const [text,setText]=useState("");
   const [posting,setPosting]=useState(false);
+  const [attachment,setAttachment]=useState(null); // data URL preview, uploaded on send
+  const [gifQuery,setGifQuery]=useState("");
+  const [showGifPicker,setShowGifPicker]=useState(false);
+  const fileInputRef=useRef();
   const comments = chapter.comments || [];
+
+  const pickAttachment = async (fileList) => {
+    const [url] = await filesToDataUrls(fileList).catch(()=>[]);
+    if (url) { setAttachment(url); setShowGifPicker(false); }
+    else toast("Could not read that file","error");
+  };
 
   const post = async () => {
     if(!user){toast("Sign in to comment","warn");return;}
-    if(!text.trim() && !pendingQuote)return;
+    if(!text.trim() && !pendingQuote && !attachment)return;
     setPosting(true);
-    await onUpdateComments(mangaId, chapter.id, null, {
-      type: "insert",
-      text: text.trim(),
-      quotePageId: pendingQuote?.pageId || null,
-    });
-    setPosting(false);
-    setText("");
-    if(pendingQuote) onConsumeQuote();
-    toast("Comment posted","success");
+    try {
+      let attachmentUrl = null;
+      if (attachment) {
+        // GIFs picked from the picker below are already hosted URLs; only
+        // local file uploads (data: URLs) need to go to Storage first.
+        attachmentUrl = attachment.startsWith("data:")
+          ? await uploadDataUrlToStorage(attachment, "comment")
+          : attachment;
+      }
+      await onUpdateComments(mangaId, chapter.id, null, {
+        type: "insert",
+        text: text.trim(),
+        quotePageId: pendingQuote?.pageId || null,
+        attachmentUrl,
+      });
+      setText("");
+      setAttachment(null);
+      if(pendingQuote) onConsumeQuote();
+      toast("Comment posted","success");
+    } catch (err) {
+      toast(err.message || "Could not post comment","error");
+    } finally {
+      setPosting(false);
+    }
   };
 
   return (
@@ -660,7 +663,30 @@ function ChapterComments({chapter, mangaId, onUpdateComments, user, toast, pendi
       {user ? (
         <div style={{marginBottom:20}}>
           <textarea className="input" rows={3} placeholder={pendingQuote ? "Add a comment about this page…" : "Share your thoughts on this chapter…"} value={text} onChange={e=>setText(e.target.value)} style={{resize:"vertical",marginBottom:8}}/>
-          <button className="btn btn-primary btn-sm" onClick={post} disabled={posting}>{posting ? "Posting…" : "Post Comment"}</button>
+
+          {attachment && (
+            <div style={{position:"relative",display:"inline-block",marginBottom:8}}>
+              <img src={attachment} alt="attachment preview" style={{maxHeight:120,maxWidth:160,border:"1px solid var(--line-strong)",display:"block"}}/>
+              <button onClick={()=>setAttachment(null)}
+                style={{position:"absolute",top:-7,right:-7,background:"var(--seal)",color:"#fff",width:20,height:20,fontSize:12,lineHeight:1,border:"none",borderRadius:"50%"}}>✕</button>
+            </div>
+          )}
+
+          {showGifPicker && (
+            <div style={{border:"1px solid var(--line-strong)",padding:10,marginBottom:8}}>
+              <input className="input" placeholder="Search GIFs… (e.g. shocked, applause)" value={gifQuery}
+                onChange={e=>setGifQuery(e.target.value)} style={{marginBottom:8}}/>
+              <GifResults query={gifQuery} onPick={(url)=>{setAttachment(url);setShowGifPicker(false);}}/>
+            </div>
+          )}
+
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            <input ref={fileInputRef} type="file" accept="image/*" style={{display:"none"}}
+              onChange={e=>{pickAttachment(e.target.files); e.target.value="";}}/>
+            <button className="btn btn-ghost btn-sm" onClick={()=>fileInputRef.current?.click()} title="Attach an image">🖼 Image</button>
+            <button className={`btn btn-ghost btn-sm ${showGifPicker?"active":""}`} onClick={()=>setShowGifPicker(s=>!s)} title="Attach a GIF">GIF</button>
+            <button className="btn btn-primary btn-sm" onClick={post} disabled={posting} style={{marginLeft:"auto"}}>{posting ? "Posting…" : "Post Comment"}</button>
+          </div>
         </div>
       ) : (
         <div style={{padding:"16px",border:"1px solid var(--line)",marginBottom:16,fontSize:13,color:"var(--paper-faint)"}}>Sign in to leave a comment</div>
@@ -683,7 +709,9 @@ function CommentItem({comment,user,toast,onDelete,onJumpToPage}) {
   const isMine=user?.username===comment.user;
   return (
     <div className="comment" onContextMenu={e=>{e.preventDefault();setCtx({x:e.clientX,y:e.clientY});}}>
-      <div className="avatar">{comment.avatar}</div>
+      <div className="avatar" style={{overflow:"hidden",padding:0}}>
+        {comment.avatarUrl ? <img src={comment.avatarUrl} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/> : comment.avatar}
+      </div>
       <div style={{flex:1,minWidth:0}}>
         <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:4}}>
           <span style={{fontWeight:600,fontSize:13}}>{comment.user}</span>
@@ -691,6 +719,9 @@ function CommentItem({comment,user,toast,onDelete,onJumpToPage}) {
           <span style={{fontSize:11,color:"var(--paper-faint)",marginLeft:"auto"}}>{comment.date}</span>
         </div>
         {comment.text && <p style={{fontSize:14,lineHeight:1.5,wordBreak:"break-word"}}>{comment.text}</p>}
+        {comment.attachment && (
+          <img src={comment.attachment} alt="" style={{maxWidth:220,maxHeight:220,border:"1px solid var(--line-strong)",display:"block",marginTop:8}}/>
+        )}
         {comment.quote && onJumpToPage && (
           <div className="quote-card" onClick={()=>onJumpToPage(comment.quote.pageIndex)} title={`Jump to Page ${comment.quote.pageIndex+1}`}>
             <div className="quote-thumb-wrap">
@@ -722,7 +753,7 @@ function CommentItem({comment,user,toast,onDelete,onJumpToPage}) {
    ========================================================================== */
 
 function ReaderPage({readerState,setReaderState,toast,setView,onUpdateChapterComments,user}) {
-  const {manga,chapterIdx,openComments}=readerState;
+  const {manga,chapterIdx,openComments,jumpToPage}=readerState;
   const chapter=manga.chapters[chapterIdx];
   const pages = chapter.pages;
   const [progress,setProgress]=useState(0);
@@ -737,6 +768,7 @@ function ReaderPage({readerState,setReaderState,toast,setView,onUpdateChapterCom
   const [showComments,setShowComments]=useState(!!openComments);
   const [pendingQuote,setPendingQuote]=useState(null);
   const [arrivalKey,setArrivalKey]=useState(null);
+
   useEffect(()=>{
     const el=containerRef.current; if(!el) return;
     const onScroll=()=>{
@@ -766,23 +798,25 @@ function ReaderPage({readerState,setReaderState,toast,setView,onUpdateChapterCom
     toast(`Page ${currentPage+1} tagged`, "success");
   };
 
-  // pendingJump carries a unique suffix so jumping to the same page twice in
-  // a row still re-triggers the effect below (two clicks on the same quote
-  // card otherwise wouldn't change state at all).
-   
-
-    const handleJumpFromComment = (pageIndex) => {
+  const handleJumpFromComment = (pageIndex) => {
     setShowComments(false);
-    setTimeout(() => {
-      const target = pageRefs.current[pageIndex];
-      if (target) {
-        target.scrollIntoView({ block: "center", behavior: "instant" });
-        setTimeout(() => setArrivalKey(String(pageIndex)), 80);
-      }
-    }, 320);
+    setReaderState({manga, chapterIdx, jumpToPage: pageIndex + "_" + Date.now()});
   };
+  // jumpToPage carries a unique suffix so repeated jumps to the same page re-trigger.
 
-   
+  useEffect(()=>{
+    if (jumpToPage == null) return;
+    const idx = typeof jumpToPage === "string" ? parseInt(jumpToPage.split("_")[0],10) : jumpToPage;
+    const t = setTimeout(()=>{
+      const target = pageRefs.current[idx];
+      if (target) {
+        target.scrollIntoView({block:"center"});
+        setArrivalKey(idx+"-"+Date.now());
+      }
+    }, 80);
+    return ()=>clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[jumpToPage]);
 
   return (
     <div style={{position:"fixed",inset:0,background:bgColor,display:"flex",flexDirection:"column",zIndex:500}}>
@@ -817,8 +851,8 @@ function ReaderPage({readerState,setReaderState,toast,setView,onUpdateChapterCom
           {pages.map((page,i)=>(
             <div key={page.id} ref={el=>pageRefs.current[i]=el} style={{position:"relative"}}>
               <LazyImg src={page.image} alt={`Page ${i+1}`} style={{width:"100%",aspectRatio:"2/3",display:"block"}}/>
-              {arrivalKey === String(i) && (
-                <SplashArrivalOverlay key={arrivalKey} onDone={()=>setArrivalKey(null)} bgColor={bgColor} />
+              {arrivalKey && arrivalKey.startsWith(i+"-") && (
+                <SplashArrivalOverlay onDone={()=>setArrivalKey(null)} />
               )}
             </div>
           ))}
@@ -878,765 +912,7 @@ function ReaderPage({readerState,setReaderState,toast,setView,onUpdateChapterCom
    Auth
    ========================================================================== */
 
-// ── CPU-efficient InkVault cinematic trailer ────────────────────────────────
-// Runs at 30fps (not 60), caps particles at 60, pre-renders grain once,
-// pauses when tab is hidden, and cancels RAF instantly on unmount/auth success.
-function AuthTrailer() {
-  const canvasRef = useRef(null);
-  useEffect(() => {
-    const C = canvasRef.current;
-    if (!C) return;
-    const ctx = C.getContext('2d');
-    const W = C.width, H = C.height;
-
-    // Pre-render grain texture once — never regenerated
-    const noiseC = document.createElement('canvas');
-    noiseC.width = W; noiseC.height = H;
-    const nctx = noiseC.getContext('2d');
-    const id = nctx.createImageData(W, H);
-    for (let i = 0; i < id.data.length; i += 4) {
-      const v = Math.floor(Math.random() * 25);
-      id.data[i] = id.data[i+1] = id.data[i+2] = v;
-      id.data[i+3] = Math.random() * 35;
-    }
-    nctx.putImageData(id, 0, 0);
-
-    const INK = '#0A0A0A', PAPER = '#F4F2ED', SEAL = '#C8312A';
-    const PAPER_DIM = '#B9B6AC', PAPER_FAINT = '#6E6C65';
-    const lerp = (a,b,t) => a+(b-a)*t;
-    const clamp = (v,a,b) => Math.max(a,Math.min(b,v));
-    const easeOut = t => 1-Math.pow(1-t,3);
-    const easeOutBack = t => { const c1=1.70158,c3=c1+1; return 1+c3*Math.pow(t-1,3)+c1*Math.pow(t-1,2); };
-    const mapRange = (t,a,b) => clamp((t-a)/(b-a),0,1);
-
-    let particles = [];
-    class Particle {
-      constructor(x,y,opts={}) {
-        this.x=x; this.y=y;
-        this.vx=(Math.random()-.5)*(opts.speed||2);
-        this.vy=(Math.random()-.5)*(opts.speed||2);
-        this.life=1; this.decay=opts.decay||.018;
-        this.size=opts.size||Math.random()*2+.8;
-        this.color=opts.color||PAPER;
-        this.gravity=opts.gravity||0;
-      }
-      update() { this.x+=this.vx; this.y+=this.vy; this.vy+=this.gravity; this.vx*=.97; this.vy*=.97; this.life-=this.decay; }
-      draw() {
-        ctx.save(); ctx.globalAlpha=Math.max(0,this.life); ctx.fillStyle=this.color;
-        ctx.beginPath(); ctx.arc(this.x,this.y,this.size,0,Math.PI*2); ctx.fill(); ctx.restore();
-      }
-    }
-    const spawnP = (x,y,n,opts) => { for(let i=0;i<n&&particles.length<60;i++) particles.push(new Particle(x,y,opts)); };
-
-    const bg   = (c,a=1) => { ctx.save(); ctx.globalAlpha=a; ctx.fillStyle=c; ctx.fillRect(0,0,W,H); ctx.restore(); };
-    const rect = (x,y,w,h,c,a=1) => { ctx.save(); ctx.globalAlpha=a; ctx.fillStyle=c; ctx.fillRect(x,y,w,h); ctx.restore(); };
-    const grain = (a=.03) => { ctx.save(); ctx.globalAlpha=a; ctx.drawImage(noiseC,0,0); ctx.restore(); };
-    const vignette = (s=.7) => {
-      const g = ctx.createRadialGradient(W/2,H/2,H*.15,W/2,H/2,H*.65);
-      g.addColorStop(0,'rgba(0,0,0,0)'); g.addColorStop(1,`rgba(0,0,0,${s})`);
-      ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
-    };
-    const sf = (size,weight,family='sans-serif') => { ctx.font=`${weight} ${size}px ${family}`; };
-    const rule = (x,y,mw,t,color=PAPER_FAINT,a=.45) => {
-      const w=easeOut(clamp(t,0,1))*mw; if(w<1) return;
-      ctx.save(); ctx.globalAlpha=a; ctx.strokeStyle=color; ctx.lineWidth=1;
-      ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x+w,y); ctx.stroke(); ctx.restore();
-    };
-    const animText = (text,cx,cy,t,opts={}) => {
-      const{color=PAPER,size=28,weight='700',family='Shippori Mincho,serif'}=opts;
-      sf(size,weight,family); ctx.textBaseline='middle'; ctx.textAlign='center';
-      const tw=ctx.measureText(text).width; let ox=cx-tw/2;
-      for(let i=0;i<text.length;i++){
-        const ch=text[i]; const delay=i*.05;
-        const p=clamp((t-delay)/.3,0,1);
-        ctx.save(); ctx.globalAlpha=p; ctx.fillStyle=color;
-        ctx.translate(ox,cy+(1-easeOut(p))*12);
-        ctx.fillText(ch,ctx.measureText(ch).width/2,0); ctx.restore();
-        ox+=ctx.measureText(ch).width;
-      }
-    };
-
-    // Scene 0 — cold open logo reveal (frames 0–149)
-    const scene0 = lt => {
-      bg('#000');
-      const logoT = mapRange(lt,.4,1);
-      if(logoT>0){
-        ctx.save(); ctx.globalAlpha=easeOut(logoT)*.85; ctx.fillStyle=PAPER;
-        sf(Math.round(lerp(48,38,easeOut(logoT))),'800','Shippori Mincho,serif');
-        ctx.textAlign='center'; ctx.textBaseline='middle';
-        ctx.fillText('InkVault',W/2,H/2); ctx.restore();
-      }
-      const tagT = mapRange(lt,.65,1);
-      if(tagT>0){
-        ctx.save(); ctx.globalAlpha=easeOut(tagT)*.6; ctx.fillStyle=PAPER_DIM;
-        sf(10,'600'); ctx.textAlign='center'; ctx.textBaseline='middle';
-        ctx.fillText('WHERE STORIES LIVE IN INK',W/2,H/2+38); ctx.restore();
-      }
-      vignette(.88); grain(.04);
-    };
-
-    // Scene 1 — hero statement (frames 150–509)
-    const scene1 = lt => {
-      bg(INK);
-      animText('Manga without',W/2,H*.42,mapRange(lt,.1,.55)*8,{size:36,weight:'800'});
-      const h2t = mapRange(lt,.22,.62);
-      if(h2t>0){
-        ctx.save(); ctx.globalAlpha=easeOut(clamp(h2t*3,0,1)); ctx.fillStyle=SEAL;
-        sf(36,'800','Shippori Mincho,serif'); ctx.textAlign='center'; ctx.textBaseline='middle';
-        const sc = lerp(1.12,1,easeOutBack(clamp(h2t*2,0,1)));
-        ctx.translate(W/2,H*.64); ctx.scale(sc,sc); ctx.fillText('compromise.',0,0); ctx.restore();
-      }
-      rule(W/2-110,H*.82,220,mapRange(lt,.55,1),PAPER_FAINT,.3);
-      vignette(.55); grain(.03);
-    };
-
-    // Scene 2 — stats (frames 510–809)
-    const scene2 = lt => {
-      bg(INK);
-      const stats=[
-        {label:'Series',    val:12000, x:W*.22},
-        {label:'Chapters',  val:240000,x:W*.5, hi:true},
-        {label:'Readers',   val:98000, x:W*.78},
-      ];
-      stats.forEach((s,i) => {
-        const delay=i*.12;
-        const p=mapRange(lt,.05+delay,.55+delay); if(p<=0) return;
-        const alpha=easeOut(p);
-        const barH=easeOut(mapRange(lt,.1+delay,.65+delay))*H*.3;
-        rect(s.x-1,H*.62-barH,2,barH,s.hi?SEAL:PAPER,alpha*.4);
-        const nv=Math.floor(easeOut(mapRange(lt,.1+delay,.75+delay))*s.val);
-        const ns=nv>=1000?Math.floor(nv/1000)+'K':String(nv);
-        ctx.save(); ctx.globalAlpha=alpha; ctx.fillStyle=s.hi?SEAL:PAPER;
-        sf(28,'800','Shippori Mincho,serif'); ctx.textAlign='center'; ctx.textBaseline='alphabetic';
-        ctx.fillText(ns,s.x,H*.62); ctx.restore();
-        ctx.save(); ctx.globalAlpha=alpha*.65; ctx.fillStyle=PAPER_DIM;
-        sf(10,'600'); ctx.textAlign='center'; ctx.textBaseline='top';
-        ctx.fillText(s.label.toUpperCase(),s.x,H*.64); ctx.restore();
-        if(Math.random()<.2) spawnP(s.x,H*.62-barH,1,{speed:2,decay:.05,size:1.5,color:s.hi?SEAL:PAPER,gravity:-.02});
-      });
-      vignette(.5); grain(.03);
-    };
-
-    // Scene 3 — finale CTA (frames 810–1319)
-    const scene3 = lt => {
-      bg('#000');
-      // Radiating lines — drawn cheap with stroke, no per-pixel ops
-      ctx.save();
-      for(let i=0;i<20;i++){
-        const angle=i/20*Math.PI*2;
-        const p=mapRange(lt,.08,.55);
-        const len=easeOut(p)*H*.7;
-        ctx.strokeStyle=PAPER; ctx.lineWidth=.4;
-        ctx.globalAlpha=easeOut(p)*.05;
-        ctx.beginPath(); ctx.moveTo(W/2,H/2); ctx.lineTo(W/2+Math.cos(angle)*len,H/2+Math.sin(angle)*len); ctx.stroke();
-      }
-      ctx.restore();
-      vignette(.92);
-      const logoT=mapRange(lt,0,.38);
-      if(logoT>0){
-        const sc=lerp(0,1,easeOutBack(logoT));
-        ctx.save(); ctx.translate(W/2,H*.35); ctx.scale(sc,sc); ctx.translate(-W/2,-H*.35);
-        ctx.globalAlpha=easeOut(logoT); ctx.fillStyle=PAPER;
-        sf(42,'800','Shippori Mincho,serif'); ctx.textAlign='center'; ctx.textBaseline='middle';
-        ctx.fillText('InkVault',W/2,H*.35); ctx.restore();
-      }
-      const tagT=mapRange(lt,.32,.6);
-      if(tagT>0) animText('Your vault is waiting.',W/2,H*.55,tagT*8,{size:18,weight:'800'});
-      const subT=mapRange(lt,.48,.72);
-      if(subT>0){
-        ctx.save(); ctx.globalAlpha=easeOut(subT); ctx.fillStyle=PAPER_DIM;
-        sf(11,'400'); ctx.textAlign='center'; ctx.textBaseline='middle';
-        ctx.fillText('No ads. No distractions. Just stories.',W/2,H*.66); ctx.restore();
-      }
-      const ctaT=mapRange(lt,.62,.86);
-      if(ctaT>0){
-        ctx.save(); ctx.globalAlpha=easeOut(ctaT);
-        const bW=164,bH=36,bX=W/2-bW-8,bY=H*.76;
-        ctx.fillStyle=PAPER; ctx.fillRect(bX,bY,bW,bH);
-        ctx.fillStyle=INK; sf(10,'700'); ctx.textAlign='center'; ctx.textBaseline='middle';
-        ctx.fillText('START READING FREE →',bX+bW/2,bY+bH/2);
-        ctx.strokeStyle='rgba(244,242,237,0.28)'; ctx.lineWidth=1;
-        ctx.strokeRect(W/2+8,bY,bW,bH);
-        ctx.fillStyle=PAPER_DIM; ctx.fillText('BROWSE LIBRARY',W/2+8+bW/2,bY+bH/2);
-        ctx.restore();
-        if(Math.random()<.06) spawnP(W/2+(Math.random()-.5)*160,H*.76+Math.random()*36,1,{speed:.4,decay:.007,size:1.2,color:PAPER_FAINT,gravity:-.008});
-      }
-      const fadeT=mapRange(lt,.87,1);
-      bg(`rgba(0,0,0,${fadeT*fadeT})`);
-      grain(.04);
-    };
-
-    const TOTAL=1320;
-    const SCENES=[{s:0,e:150},{s:150,e:510},{s:510,e:810},{s:810,e:1320}];
-    const SCENE_FNS=[scene0,scene1,scene2,scene3];
-    const FPS_INTERVAL=1000/30; // 30fps cap
-    let frame=0, raf=null, lastT=0;
-
-    const loop = ts => {
-      if(ts-lastT<FPS_INTERVAL){ raf=requestAnimationFrame(loop); return; }
-      lastT=ts;
-      ctx.clearRect(0,0,W,H);
-      bg('#000');
-      SCENES.forEach((sc,i)=>{
-        if(frame<sc.s||frame>=sc.e) return;
-        SCENE_FNS[i]((frame-sc.s)/(sc.e-sc.s));
-      });
-      particles=particles.filter(p=>{p.update();p.draw();return p.life>0});
-      frame=(frame+1)%TOTAL;
-      raf=requestAnimationFrame(loop);
-    };
-
-    const pause  = () => { if(raf){ cancelAnimationFrame(raf); raf=null; } };
-    const resume = () => { if(!raf) raf=requestAnimationFrame(loop); };
-    document.addEventListener('visibilitychange', ()=>document.hidden?pause():resume());
-    raf=requestAnimationFrame(loop);
-
-    return () => {
-      pause();
-      document.removeEventListener('visibilitychange', ()=>document.hidden?pause():resume());
-    };
-  }, []);
-
-  return (
-    <canvas
-      ref={canvasRef}
-      width={640}
-      height={240}
-      style={{ display:'block', width:'100%', height:'240px', objectFit:'cover' }}
-    />
-  );
-}
-// ── CPU-efficient InkVault cinematic trailer ────────────────────────────────
-// Runs at 30fps (not 60), caps particles at 60, pre-renders grain once,
-// pauses when tab is hidden, and cancels RAF instantly on unmount/auth success.
-function AuthTrailer() {
-  const canvasRef = useRef(null);
-  useEffect(() => {
-    const C = canvasRef.current;
-    if (!C) return;
-    const ctx = C.getContext('2d');
-    const W = C.width, H = C.height;
-
-    // Pre-render grain texture once — never regenerated
-    const noiseC = document.createElement('canvas');
-    noiseC.width = W; noiseC.height = H;
-    const nctx = noiseC.getContext('2d');
-    const id = nctx.createImageData(W, H);
-    for (let i = 0; i < id.data.length; i += 4) {
-      const v = Math.floor(Math.random() * 25);
-      id.data[i] = id.data[i+1] = id.data[i+2] = v;
-      id.data[i+3] = Math.random() * 35;
-    }
-    nctx.putImageData(id, 0, 0);
-
-    const INK = '#0A0A0A', PAPER = '#F4F2ED', SEAL = '#C8312A';
-    const PAPER_DIM = '#B9B6AC', PAPER_FAINT = '#6E6C65';
-    const lerp = (a,b,t) => a+(b-a)*t;
-    const clamp = (v,a,b) => Math.max(a,Math.min(b,v));
-    const easeOut = t => 1-Math.pow(1-t,3);
-    const easeOutBack = t => { const c1=1.70158,c3=c1+1; return 1+c3*Math.pow(t-1,3)+c1*Math.pow(t-1,2); };
-    const mapRange = (t,a,b) => clamp((t-a)/(b-a),0,1);
-
-    let particles = [];
-    class Particle {
-      constructor(x,y,opts={}) {
-        this.x=x; this.y=y;
-        this.vx=(Math.random()-.5)*(opts.speed||2);
-        this.vy=(Math.random()-.5)*(opts.speed||2);
-        this.life=1; this.decay=opts.decay||.018;
-        this.size=opts.size||Math.random()*2+.8;
-        this.color=opts.color||PAPER;
-        this.gravity=opts.gravity||0;
-      }
-      update() { this.x+=this.vx; this.y+=this.vy; this.vy+=this.gravity; this.vx*=.97; this.vy*=.97; this.life-=this.decay; }
-      draw() {
-        ctx.save(); ctx.globalAlpha=Math.max(0,this.life); ctx.fillStyle=this.color;
-        ctx.beginPath(); ctx.arc(this.x,this.y,this.size,0,Math.PI*2); ctx.fill(); ctx.restore();
-      }
-    }
-    const spawnP = (x,y,n,opts) => { for(let i=0;i<n&&particles.length<60;i++) particles.push(new Particle(x,y,opts)); };
-
-    const bg   = (c,a=1) => { ctx.save(); ctx.globalAlpha=a; ctx.fillStyle=c; ctx.fillRect(0,0,W,H); ctx.restore(); };
-    const rect = (x,y,w,h,c,a=1) => { ctx.save(); ctx.globalAlpha=a; ctx.fillStyle=c; ctx.fillRect(x,y,w,h); ctx.restore(); };
-    const grain = (a=.03) => { ctx.save(); ctx.globalAlpha=a; ctx.drawImage(noiseC,0,0); ctx.restore(); };
-    const vignette = (s=.7) => {
-      const g = ctx.createRadialGradient(W/2,H/2,H*.15,W/2,H/2,H*.65);
-      g.addColorStop(0,'rgba(0,0,0,0)'); g.addColorStop(1,`rgba(0,0,0,${s})`);
-      ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
-    };
-    const sf = (size,weight,family='sans-serif') => { ctx.font=`${weight} ${size}px ${family}`; };
-    const rule = (x,y,mw,t,color=PAPER_FAINT,a=.45) => {
-      const w=easeOut(clamp(t,0,1))*mw; if(w<1) return;
-      ctx.save(); ctx.globalAlpha=a; ctx.strokeStyle=color; ctx.lineWidth=1;
-      ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x+w,y); ctx.stroke(); ctx.restore();
-    };
-    const animText = (text,cx,cy,t,opts={}) => {
-      const{color=PAPER,size=28,weight='700',family='Shippori Mincho,serif'}=opts;
-      sf(size,weight,family); ctx.textBaseline='middle'; ctx.textAlign='center';
-      const tw=ctx.measureText(text).width; let ox=cx-tw/2;
-      for(let i=0;i<text.length;i++){
-        const ch=text[i]; const delay=i*.05;
-        const p=clamp((t-delay)/.3,0,1);
-        ctx.save(); ctx.globalAlpha=p; ctx.fillStyle=color;
-        ctx.translate(ox,cy+(1-easeOut(p))*12);
-        ctx.fillText(ch,ctx.measureText(ch).width/2,0); ctx.restore();
-        ox+=ctx.measureText(ch).width;
-      }
-    };
-
-    // Scene 0 — cold open logo reveal (frames 0–149)
-    const scene0 = lt => {
-      bg('#000');
-      const logoT = mapRange(lt,.4,1);
-      if(logoT>0){
-        ctx.save(); ctx.globalAlpha=easeOut(logoT)*.85; ctx.fillStyle=PAPER;
-        sf(Math.round(lerp(48,38,easeOut(logoT))),'800','Shippori Mincho,serif');
-        ctx.textAlign='center'; ctx.textBaseline='middle';
-        ctx.fillText('InkVault',W/2,H/2); ctx.restore();
-      }
-      const tagT = mapRange(lt,.65,1);
-      if(tagT>0){
-        ctx.save(); ctx.globalAlpha=easeOut(tagT)*.6; ctx.fillStyle=PAPER_DIM;
-        sf(10,'600'); ctx.textAlign='center'; ctx.textBaseline='middle';
-        ctx.fillText('WHERE STORIES LIVE IN INK',W/2,H/2+38); ctx.restore();
-      }
-      vignette(.88); grain(.04);
-    };
-
-    // Scene 1 — hero statement (frames 150–509)
-    const scene1 = lt => {
-      bg(INK);
-      animText('Manga without',W/2,H*.42,mapRange(lt,.1,.55)*8,{size:36,weight:'800'});
-      const h2t = mapRange(lt,.22,.62);
-      if(h2t>0){
-        ctx.save(); ctx.globalAlpha=easeOut(clamp(h2t*3,0,1)); ctx.fillStyle=SEAL;
-        sf(36,'800','Shippori Mincho,serif'); ctx.textAlign='center'; ctx.textBaseline='middle';
-        const sc = lerp(1.12,1,easeOutBack(clamp(h2t*2,0,1)));
-        ctx.translate(W/2,H*.64); ctx.scale(sc,sc); ctx.fillText('compromise.',0,0); ctx.restore();
-      }
-      rule(W/2-110,H*.82,220,mapRange(lt,.55,1),PAPER_FAINT,.3);
-      vignette(.55); grain(.03);
-    };
-
-    // Scene 2 — stats (frames 510–809)
-    const scene2 = lt => {
-      bg(INK);
-      const stats=[
-        {label:'Series',    val:12000, x:W*.22},
-        {label:'Chapters',  val:240000,x:W*.5, hi:true},
-        {label:'Readers',   val:98000, x:W*.78},
-      ];
-      stats.forEach((s,i) => {
-        const delay=i*.12;
-        const p=mapRange(lt,.05+delay,.55+delay); if(p<=0) return;
-        const alpha=easeOut(p);
-        const barH=easeOut(mapRange(lt,.1+delay,.65+delay))*H*.3;
-        rect(s.x-1,H*.62-barH,2,barH,s.hi?SEAL:PAPER,alpha*.4);
-        const nv=Math.floor(easeOut(mapRange(lt,.1+delay,.75+delay))*s.val);
-        const ns=nv>=1000?Math.floor(nv/1000)+'K':String(nv);
-        ctx.save(); ctx.globalAlpha=alpha; ctx.fillStyle=s.hi?SEAL:PAPER;
-        sf(28,'800','Shippori Mincho,serif'); ctx.textAlign='center'; ctx.textBaseline='alphabetic';
-        ctx.fillText(ns,s.x,H*.62); ctx.restore();
-        ctx.save(); ctx.globalAlpha=alpha*.65; ctx.fillStyle=PAPER_DIM;
-        sf(10,'600'); ctx.textAlign='center'; ctx.textBaseline='top';
-        ctx.fillText(s.label.toUpperCase(),s.x,H*.64); ctx.restore();
-        if(Math.random()<.2) spawnP(s.x,H*.62-barH,1,{speed:2,decay:.05,size:1.5,color:s.hi?SEAL:PAPER,gravity:-.02});
-      });
-      vignette(.5); grain(.03);
-    };
-
-    // Scene 3 — finale CTA (frames 810–1319)
-    const scene3 = lt => {
-      bg('#000');
-      // Radiating lines — drawn cheap with stroke, no per-pixel ops
-      ctx.save();
-      for(let i=0;i<20;i++){
-        const angle=i/20*Math.PI*2;
-        const p=mapRange(lt,.08,.55);
-        const len=easeOut(p)*H*.7;
-        ctx.strokeStyle=PAPER; ctx.lineWidth=.4;
-        ctx.globalAlpha=easeOut(p)*.05;
-        ctx.beginPath(); ctx.moveTo(W/2,H/2); ctx.lineTo(W/2+Math.cos(angle)*len,H/2+Math.sin(angle)*len); ctx.stroke();
-      }
-      ctx.restore();
-      vignette(.92);
-      const logoT=mapRange(lt,0,.38);
-      if(logoT>0){
-        const sc=lerp(0,1,easeOutBack(logoT));
-        ctx.save(); ctx.translate(W/2,H*.35); ctx.scale(sc,sc); ctx.translate(-W/2,-H*.35);
-        ctx.globalAlpha=easeOut(logoT); ctx.fillStyle=PAPER;
-        sf(42,'800','Shippori Mincho,serif'); ctx.textAlign='center'; ctx.textBaseline='middle';
-        ctx.fillText('InkVault',W/2,H*.35); ctx.restore();
-      }
-      const tagT=mapRange(lt,.32,.6);
-      if(tagT>0) animText('Your vault is waiting.',W/2,H*.55,tagT*8,{size:18,weight:'800'});
-      const subT=mapRange(lt,.48,.72);
-      if(subT>0){
-        ctx.save(); ctx.globalAlpha=easeOut(subT); ctx.fillStyle=PAPER_DIM;
-        sf(11,'400'); ctx.textAlign='center'; ctx.textBaseline='middle';
-        ctx.fillText('No ads. No distractions. Just stories.',W/2,H*.66); ctx.restore();
-      }
-      const ctaT=mapRange(lt,.62,.86);
-      if(ctaT>0){
-        ctx.save(); ctx.globalAlpha=easeOut(ctaT);
-        const bW=164,bH=36,bX=W/2-bW-8,bY=H*.76;
-        ctx.fillStyle=PAPER; ctx.fillRect(bX,bY,bW,bH);
-        ctx.fillStyle=INK; sf(10,'700'); ctx.textAlign='center'; ctx.textBaseline='middle';
-        ctx.fillText('START READING FREE →',bX+bW/2,bY+bH/2);
-        ctx.strokeStyle='rgba(244,242,237,0.28)'; ctx.lineWidth=1;
-        ctx.strokeRect(W/2+8,bY,bW,bH);
-        ctx.fillStyle=PAPER_DIM; ctx.fillText('BROWSE LIBRARY',W/2+8+bW/2,bY+bH/2);
-        ctx.restore();
-        if(Math.random()<.06) spawnP(W/2+(Math.random()-.5)*160,H*.76+Math.random()*36,1,{speed:.4,decay:.007,size:1.2,color:PAPER_FAINT,gravity:-.008});
-      }
-      const fadeT=mapRange(lt,.87,1);
-      bg(`rgba(0,0,0,${fadeT*fadeT})`);
-      grain(.04);
-    };
-
-    const TOTAL=1320;
-    const SCENES=[{s:0,e:150},{s:150,e:510},{s:510,e:810},{s:810,e:1320}];
-    const SCENE_FNS=[scene0,scene1,scene2,scene3];
-    const FPS_INTERVAL=1000/30; // 30fps cap
-    let frame=0, raf=null, lastT=0;
-
-    const loop = ts => {
-      if(ts-lastT<FPS_INTERVAL){ raf=requestAnimationFrame(loop); return; }
-      lastT=ts;
-      ctx.clearRect(0,0,W,H);
-      bg('#000');
-      SCENES.forEach((sc,i)=>{
-        if(frame<sc.s||frame>=sc.e) return;
-        SCENE_FNS[i]((frame-sc.s)/(sc.e-sc.s));
-      });
-      particles=particles.filter(p=>{p.update();p.draw();return p.life>0});
-      frame=(frame+1)%TOTAL;
-      raf=requestAnimationFrame(loop);
-    };
-
-    const pause  = () => { if(raf){ cancelAnimationFrame(raf); raf=null; } };
-    const resume = () => { if(!raf) raf=requestAnimationFrame(loop); };
-    document.addEventListener('visibilitychange', ()=>document.hidden?pause():resume());
-    raf=requestAnimationFrame(loop);
-
-    return () => {
-      pause();
-      document.removeEventListener('visibilitychange', ()=>document.hidden?pause():resume());
-    };
-  }, []);
-
-  return (
-    <canvas
-      ref={canvasRef}
-      width={640}
-      height={240}
-      style={{ display:'block', width:'100%', height:'240px', objectFit:'cover' }}
-    />
-  );
-}
-
-// ── Updated AuthModal — trailer plays behind the form ──────────────────────
-function AuthModal({onClose, onLogin, toast}) {
-  const [mode,setMode]   = useState("login");
-  const [email,setEmail] = useState("");
-  const [username,setUsername] = useState("");
-  const [password,setPassword] = useState("");
-  const [adminCode,setAdminCode] = useState("");
-  const [loading,setLoading] = useState(false);
-  const [error,setError]   = useState("");
-
-  const submit = async () => {
-    if(!email.trim()||!password){ setError("Email and password are required."); return; }
-    if(mode==="register"&&!username.trim()){ setError("Choose a username."); return; }
-    setError(""); setLoading(true);
-    try {
-      if(mode==="login"){
-        const{data,error}=await supabase.auth.signInWithPassword({email:email.trim(),password});
-        if(error) throw error;
-        await onLogin(data.user); onClose();
-      } else {
-        const{data,error}=await supabase.auth.signUp({
-          email:email.trim(),password,options:{data:{username:username.trim()}}
-        });
-        if(error) throw error;
-        if(data.user&&data.user.identities&&data.user.identities.length===0){
-          setError("That email is already registered."); setLoading(false); return;
-        }
-        if(!data.session){
-          toast("Account created — check your email to confirm, then sign in.","success");
-          setMode("login"); return;
-        }
-        if(adminCode.trim()){
-          const{data:redeemed,error:redeemError}=await supabase.rpc("redeem_admin_code",{input_code:adminCode.trim()});
-          if(redeemError||!redeemed) toast("Admin code was invalid or already used.","warn");
-          else toast("Admin access granted.","success");
-        }
-        await onLogin(data.user); onClose();
-      }
-    } catch(err) {
-      let message="Something went wrong. Please try again.";
-      if(err){
-        if(typeof err==="string") message=err;
-        else if(err.message) message=err.message;
-        else if(err.error_description) message=err.error_description;
-      }
-      setError(message);
-    } finally { setLoading(false); }
-  };
-
-  return (
-    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
-      <div style={{
-        background:'var(--ink-soft)',
-        border:'1px solid var(--line-strong)',
-        borderRadius:2,
-        width:'100%',
-        maxWidth:460,
-        maxHeight:'90vh',
-        overflowY:'auto',
-        animation:'fadeUp 0.25s ease',
-      }}>
-        {/* ── Trailer banner ─────────────────────────────────────────── */}
-        <div style={{position:'relative',overflow:'hidden',borderBottom:'1px solid var(--line)'}}>
-          <AuthTrailer />
-          <div style={{
-            position:'absolute',inset:0,
-            background:'linear-gradient(to bottom, transparent 55%, rgba(21,21,21,0.96) 100%)',
-            pointerEvents:'none',
-          }}/>
-          <div style={{position:'absolute',bottom:12,left:16,pointerEvents:'none'}}>
-            <img src={ASSET_LOGO_NAV} alt="InkVault"
-              style={{height:18,width:'auto',display:'block',filter:'invert(1) brightness(1.4)',opacity:.9}}/>
-          </div>
-        </div>
-
-        {/* ── Auth form ──────────────────────────────────────────────── */}
-        <div style={{padding:'26px 28px 28px'}}>
-          <div className="brush" style={{fontSize:20,fontWeight:800,marginBottom:3}}>
-            {mode==="login"?"Welcome back":"Join InkVault"}
-          </div>
-          <div style={{color:'var(--paper-faint)',fontSize:12.5,marginBottom:20}}>
-            {mode==="login"?"Sign in to your account":"Create your free account"}
-          </div>
-
-          <div style={{display:'flex',flexDirection:'column',gap:10,marginBottom:6}}>
-            <input className="input" type="email" placeholder="Email"
-              value={email} onChange={e=>setEmail(e.target.value)}
-              onKeyDown={e=>e.key==="Enter"&&submit()}/>
-            {mode==="register"&&(
-              <input className="input" placeholder="Username"
-                value={username} onChange={e=>setUsername(e.target.value)}
-                onKeyDown={e=>e.key==="Enter"&&submit()}/>
-            )}
-            <input className="input" type="password" placeholder="Password"
-              value={password} onChange={e=>setPassword(e.target.value)}
-              onKeyDown={e=>e.key==="Enter"&&submit()}/>
-            {mode==="register"&&(
-              <input className="input" placeholder="Admin code (optional)"
-                value={adminCode} onChange={e=>setAdminCode(e.target.value)}
-                onKeyDown={e=>e.key==="Enter"&&submit()}/>
-            )}
-          </div>
-
-          {error&&<div style={{color:'var(--seal)',fontSize:12.5,marginTop:8,marginBottom:2}}>{error}</div>}
-
-          <button className="btn btn-primary" onClick={submit} disabled={loading}
-            style={{width:'100%',marginTop:14}}>
-            {loading?"Please wait…":(mode==="login"?"Sign In":"Create Account")}
-          </button>
-
-          <div style={{textAlign:'center',marginTop:14,fontSize:12.5,color:'var(--paper-faint)'}}>
-            {mode==="login"?"No account?":"Already have one?"}
-            <button onClick={()=>{setMode(mode==="login"?"register":"login");setError("");}}
-              style={{color:'var(--paper)',marginLeft:4,cursor:'pointer',fontWeight:700,textDecoration:'underline'}}>
-              {mode==="login"?"Sign up":"Sign in"}
-            </button>
-          </div>
-
-          {mode==="register"&&(
-            <div style={{marginTop:14,padding:'10px 12px',border:'1px solid var(--line)',fontSize:11.5,color:'var(--paper-faint)',lineHeight:1.5}}>
-              Have an admin code from the InkVault team? Enter it above — it's single-use and grants admin access immediately. Leave it blank for a normal reader account.
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-function AuthTrailer() {
-  const canvasRef = useRef(null);
-  useEffect(() => {
-    const C = canvasRef.current; if(!C) return;
-    const ctx = C.getContext('2d');
-    const W = C.width, H = C.height;
-    const noiseC = document.createElement('canvas');
-    noiseC.width=W; noiseC.height=H;
-    const nctx = noiseC.getContext('2d');
-    const id = nctx.createImageData(W,H);
-    for(let i=0;i<id.data.length;i+=4){const v=Math.floor(Math.random()*25);id.data[i]=id.data[i+1]=id.data[i+2]=v;id.data[i+3]=Math.random()*35;}
-    nctx.putImageData(id,0,0);
-    const PAPER='#F4F2ED',SEAL='#C8312A',PAPER_DIM='#B9B6AC',PAPER_FAINT='#6E6C65';
-    const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-    const easeOut=t=>1-Math.pow(1-t,3);
-    const easeOutBack=t=>{const c1=1.70158,c3=c1+1;return 1+c3*Math.pow(t-1,3)+c1*Math.pow(t-1,2);};
-    const mapRange=(t,a,b)=>clamp((t-a)/(b-a),0,1);
-    const lerp=(a,b,t)=>a+(b-a)*t;
-    let particles=[];
-    const spawnP=(x,y,n,opts)=>{for(let i=0;i<n&&particles.length<60;i++)particles.push({x,y,vx:(Math.random()-.5)*(opts.speed||2),vy:(Math.random()-.5)*(opts.speed||2),life:1,decay:opts.decay||.018,size:opts.size||Math.random()*2+.8,color:opts.color||PAPER,gravity:opts.gravity||0});};
-    const bg=(c,a=1)=>{ctx.save();ctx.globalAlpha=a;ctx.fillStyle=c;ctx.fillRect(0,0,W,H);ctx.restore();};
-    const grain=(a=.03)=>{ctx.save();ctx.globalAlpha=a;ctx.drawImage(noiseC,0,0);ctx.restore();};
-    const vignette=(s=.7)=>{const g=ctx.createRadialGradient(W/2,H/2,H*.15,W/2,H/2,H*.65);g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(1,`rgba(0,0,0,${s})`);ctx.fillStyle=g;ctx.fillRect(0,0,W,H);};
-    const sf=(size,weight,family='sans-serif')=>{ctx.font=`${weight} ${size}px ${family}`;};
-    const animText=(text,cx,cy,t,opts={})=>{
-      const{color=PAPER,size=28,weight='700',family='serif'}=opts;
-      sf(size,weight,family);ctx.textBaseline='middle';ctx.textAlign='center';
-      const tw=ctx.measureText(text).width;let ox=cx-tw/2;
-      for(let i=0;i<text.length;i++){const ch=text[i];const p=clamp((t-i*.05)/.3,0,1);ctx.save();ctx.globalAlpha=p;ctx.fillStyle=color;ctx.translate(ox,cy+(1-easeOut(p))*12);ctx.fillText(ch,ctx.measureText(ch).width/2,0);ctx.restore();ox+=ctx.measureText(ch).width;}
-    };
-    const scene0=lt=>{bg('#000');const logoT=mapRange(lt,.4,1);if(logoT>0){ctx.save();ctx.globalAlpha=easeOut(logoT)*.85;ctx.fillStyle=PAPER;sf(Math.round(lerp(48,38,easeOut(logoT))),'800','serif');ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('InkVault',W/2,H/2);ctx.restore();}const tagT=mapRange(lt,.65,1);if(tagT>0){ctx.save();ctx.globalAlpha=easeOut(tagT)*.6;ctx.fillStyle=PAPER_DIM;sf(10,'600');ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('WHERE STORIES LIVE IN INK',W/2,H/2+38);ctx.restore();}vignette(.88);grain(.04);};
-    const scene1=lt=>{bg('#0A0A0A');animText('Manga without',W/2,H*.42,mapRange(lt,.1,.55)*8,{size:36,weight:'800'});const h2t=mapRange(lt,.22,.62);if(h2t>0){ctx.save();ctx.globalAlpha=easeOut(clamp(h2t*3,0,1));ctx.fillStyle=SEAL;sf(36,'800','serif');ctx.textAlign='center';ctx.textBaseline='middle';const sc=lerp(1.12,1,easeOutBack(clamp(h2t*2,0,1)));ctx.translate(W/2,H*.64);ctx.scale(sc,sc);ctx.fillText('compromise.',0,0);ctx.restore();}vignette(.55);grain(.03);};
-    const scene2=lt=>{bg('#0A0A0A');const stats=[{label:'Series',val:12000,x:W*.22},{label:'Chapters',val:240000,x:W*.5,hi:true},{label:'Readers',val:98000,x:W*.78}];stats.forEach((s,i)=>{const delay=i*.12;const p=mapRange(lt,.05+delay,.55+delay);if(p<=0)return;const alpha=easeOut(p);const barH=easeOut(mapRange(lt,.1+delay,.65+delay))*H*.3;ctx.save();ctx.globalAlpha=alpha*.4;ctx.fillStyle=s.hi?SEAL:PAPER;ctx.fillRect(s.x-1,H*.62-barH,2,barH);ctx.restore();const nv=Math.floor(easeOut(mapRange(lt,.1+delay,.75+delay))*s.val);const ns=nv>=1000?Math.floor(nv/1000)+'K':String(nv);ctx.save();ctx.globalAlpha=alpha;ctx.fillStyle=s.hi?SEAL:PAPER;sf(28,'800','serif');ctx.textAlign='center';ctx.textBaseline='alphabetic';ctx.fillText(ns,s.x,H*.62);ctx.restore();ctx.save();ctx.globalAlpha=alpha*.65;ctx.fillStyle=PAPER_DIM;sf(10,'600');ctx.textAlign='center';ctx.textBaseline='top';ctx.fillText(s.label.toUpperCase(),s.x,H*.64);ctx.restore();if(Math.random()<.2)spawnP(s.x,H*.62-barH,1,{speed:2,decay:.05,size:1.5,color:s.hi?SEAL:PAPER,gravity:-.02});});vignette(.5);grain(.03);};
-    const scene3=lt=>{bg('#000');ctx.save();for(let i=0;i<20;i++){const angle=i/20*Math.PI*2;const p=mapRange(lt,.08,.55);const len=easeOut(p)*H*.7;ctx.strokeStyle=PAPER;ctx.lineWidth=.4;ctx.globalAlpha=easeOut(p)*.05;ctx.beginPath();ctx.moveTo(W/2,H/2);ctx.lineTo(W/2+Math.cos(angle)*len,H/2+Math.sin(angle)*len);ctx.stroke();}ctx.restore();vignette(.92);const logoT=mapRange(lt,0,.38);if(logoT>0){const sc=lerp(0,1,easeOutBack(logoT));ctx.save();ctx.translate(W/2,H*.35);ctx.scale(sc,sc);ctx.translate(-W/2,-H*.35);ctx.globalAlpha=easeOut(logoT);ctx.fillStyle=PAPER;sf(42,'800','serif');ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('InkVault',W/2,H*.35);ctx.restore();}const tagT=mapRange(lt,.32,.6);if(tagT>0)animText('Your vault is waiting.',W/2,H*.55,tagT*8,{size:18,weight:'800'});const ctaT=mapRange(lt,.62,.86);if(ctaT>0){ctx.save();ctx.globalAlpha=easeOut(ctaT);const bW=164,bH=36,bX=W/2-bW-8,bY=H*.76;ctx.fillStyle=PAPER;ctx.fillRect(bX,bY,bW,bH);ctx.fillStyle='#0A0A0A';sf(10,'700');ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('START READING FREE →',bX+bW/2,bY+bH/2);ctx.strokeStyle='rgba(244,242,237,0.28)';ctx.lineWidth=1;ctx.strokeRect(W/2+8,bY,bW,bH);ctx.fillStyle=PAPER_DIM;ctx.fillText('BROWSE LIBRARY',W/2+8+bW/2,bY+bH/2);ctx.restore();}const fadeT=mapRange(lt,.87,1);bg(`rgba(0,0,0,${fadeT*fadeT})`);grain(.04);};
-    const TOTAL=1320,SCENES=[{s:0,e:150},{s:150,e:510},{s:510,e:810},{s:810,e:1320}],FNS=[scene0,scene1,scene2,scene3];
-    const INTERVAL=1000/30;let frame=0,raf=null,lastT=0;
-    const loop=ts=>{if(ts-lastT<INTERVAL){raf=requestAnimationFrame(loop);return;}lastT=ts;ctx.clearRect(0,0,W,H);bg('#000');SCENES.forEach((sc,i)=>{if(frame<sc.s||frame>=sc.e)return;FNS[i]((frame-sc.s)/(sc.e-sc.s));});particles=particles.filter(p=>{p.x+=p.vx;p.y+=p.vy;p.vy+=p.gravity;p.vx*=.97;p.vy*=.97;p.life-=p.decay;if(p.life>0){ctx.save();ctx.globalAlpha=p.life;ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(p.x,p.y,p.size,0,Math.PI*2);ctx.fill();ctx.restore();}return p.life>0;});frame=(frame+1)%TOTAL;raf=requestAnimationFrame(loop);};
-    const pause=()=>{if(raf){cancelAnimationFrame(raf);raf=null;}};
-    const resume=()=>{if(!raf)raf=requestAnimationFrame(loop);};
-    const onVis=()=>document.hidden?pause():resume();
-    document.addEventListener('visibilitychange',onVis);
-    raf=requestAnimationFrame(loop);
-    return()=>{pause();document.removeEventListener('visibilitychange',onVis);};
-  },[]);
-  return <canvas ref={canvasRef} width={640} height={240} style={{display:'block',width:'100%',height:'240px',objectFit:'cover'}}/>;
-}
-// ── Updated AuthModal — trailer plays behind the form ──────────────────────
-function AuthModal({onClose, onLogin, toast}) {
-  const [mode,setMode]   = useState("login");
-  const [email,setEmail] = useState("");
-  const [username,setUsername] = useState("");
-  const [password,setPassword] = useState("");
-  const [adminCode,setAdminCode] = useState("");
-  const [loading,setLoading] = useState(false);
-  const [error,setError]   = useState("");
-
-  const submit = async () => {
-    if(!email.trim()||!password){ setError("Email and password are required."); return; }
-    if(mode==="register"&&!username.trim()){ setError("Choose a username."); return; }
-    setError(""); setLoading(true);
-    try {
-      if(mode==="login"){
-        const{data,error}=await supabase.auth.signInWithPassword({email:email.trim(),password});
-        if(error) throw error;
-        await onLogin(data.user); onClose();
-      } else {
-        const{data,error}=await supabase.auth.signUp({
-          email:email.trim(),password,options:{data:{username:username.trim()}}
-        });
-        if(error) throw error;
-        if(data.user&&data.user.identities&&data.user.identities.length===0){
-          setError("That email is already registered."); setLoading(false); return;
-        }
-        if(!data.session){
-          toast("Account created — check your email to confirm, then sign in.","success");
-          setMode("login"); return;
-        }
-        if(adminCode.trim()){
-          const{data:redeemed,error:redeemError}=await supabase.rpc("redeem_admin_code",{input_code:adminCode.trim()});
-          if(redeemError||!redeemed) toast("Admin code was invalid or already used.","warn");
-          else toast("Admin access granted.","success");
-        }
-        await onLogin(data.user); onClose();
-      }
-    } catch(err) {
-      let message="Something went wrong. Please try again.";
-      if(err){
-        if(typeof err==="string") message=err;
-        else if(err.message) message=err.message;
-        else if(err.error_description) message=err.error_description;
-      }
-      setError(message);
-    } finally { setLoading(false); }
-  };
-
-  return (
-    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
-      <div style={{
-        background:'var(--ink-soft)',
-        border:'1px solid var(--line-strong)',
-        borderRadius:2,
-        width:'100%',
-        maxWidth:460,
-        maxHeight:'90vh',
-        overflowY:'auto',
-        animation:'fadeUp 0.25s ease',
-      }}>
-        {/* ── Trailer banner ─────────────────────────────────────────── */}
-        <div style={{position:'relative',overflow:'hidden',borderBottom:'1px solid var(--line)'}}>
-          <AuthTrailer />
-          <div style={{
-            position:'absolute',inset:0,
-            background:'linear-gradient(to bottom, transparent 55%, rgba(21,21,21,0.96) 100%)',
-            pointerEvents:'none',
-          }}/>
-          <div style={{position:'absolute',bottom:12,left:16,pointerEvents:'none'}}>
-            <img src={ASSET_LOGO_NAV} alt="InkVault"
-              style={{height:18,width:'auto',display:'block',filter:'invert(1) brightness(1.4)',opacity:.9}}/>
-          </div>
-        </div>
-
-        {/* ── Auth form ──────────────────────────────────────────────── */}
-        <div style={{padding:'26px 28px 28px'}}>
-          <div className="brush" style={{fontSize:20,fontWeight:800,marginBottom:3}}>
-            {mode==="login"?"Welcome back":"Join InkVault"}
-          </div>
-          <div style={{color:'var(--paper-faint)',fontSize:12.5,marginBottom:20}}>
-            {mode==="login"?"Sign in to your account":"Create your free account"}
-          </div>
-
-          <div style={{display:'flex',flexDirection:'column',gap:10,marginBottom:6}}>
-            <input className="input" type="email" placeholder="Email"
-              value={email} onChange={e=>setEmail(e.target.value)}
-              onKeyDown={e=>e.key==="Enter"&&submit()}/>
-            {mode==="register"&&(
-              <input className="input" placeholder="Username"
-                value={username} onChange={e=>setUsername(e.target.value)}
-                onKeyDown={e=>e.key==="Enter"&&submit()}/>
-            )}
-            <input className="input" type="password" placeholder="Password"
-              value={password} onChange={e=>setPassword(e.target.value)}
-              onKeyDown={e=>e.key==="Enter"&&submit()}/>
-            {mode==="register"&&(
-              <input className="input" placeholder="Admin code (optional)"
-                value={adminCode} onChange={e=>setAdminCode(e.target.value)}
-                onKeyDown={e=>e.key==="Enter"&&submit()}/>
-            )}
-          </div>
-
-          {error&&<div style={{color:'var(--seal)',fontSize:12.5,marginTop:8,marginBottom:2}}>{error}</div>}
-
-          <button className="btn btn-primary" onClick={submit} disabled={loading}
-            style={{width:'100%',marginTop:14}}>
-            {loading?"Please wait…":(mode==="login"?"Sign In":"Create Account")}
-          </button>
-
-          <div style={{textAlign:'center',marginTop:14,fontSize:12.5,color:'var(--paper-faint)'}}>
-            {mode==="login"?"No account?":"Already have one?"}
-            <button onClick={()=>{setMode(mode==="login"?"register":"login");setError("");}}
-              style={{color:'var(--paper)',marginLeft:4,cursor:'pointer',fontWeight:700,textDecoration:'underline'}}>
-              {mode==="login"?"Sign up":"Sign in"}
-            </button>
-          </div>
-
-          {mode==="register"&&(
-            <div style={{marginTop:14,padding:'10px 12px',border:'1px solid var(--line)',fontSize:11.5,color:'var(--paper-faint)',lineHeight:1.5}}>
-              Have an admin code from the InkVault team? Enter it above — it's single-use and grants admin access immediately. Leave it blank for a normal reader account.
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
+function AuthModal({onClose,onLogin,toast}) {
   const [mode,setMode]=useState("login");
   const [email,setEmail]=useState("");
   const [username,setUsername]=useState("");
@@ -1720,15 +996,7 @@ function AuthModal({onClose, onLogin, toast}) {
 
   return (
     <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
-      <div style={{background:'var(--ink-soft)',border:'1px solid var(--line-strong)',borderRadius:2,width:'100%',maxWidth:460,maxHeight:'90vh',overflowY:'auto',animation:'fadeUp 0.25s ease'}}>
-        <div style={{position:'relative',overflow:'hidden',borderBottom:'1px solid var(--line)'}}>
-          <AuthTrailer/>
-          <div style={{position:'absolute',inset:0,background:'linear-gradient(to bottom,transparent 55%,rgba(21,21,21,0.96) 100%)',pointerEvents:'none'}}/>
-          <div style={{position:'absolute',bottom:12,left:16,pointerEvents:'none'}}>
-            <img src={ASSET_LOGO_NAV} alt="InkVault" style={{height:18,width:'auto',display:'block',filter:'invert(1) brightness(1.4)',opacity:.9}}/>
-          </div>
-        </div>
-        <div style={{padding:'26px 28px 28px'}}>
+      <div className="modal">
         <img src={ASSET_LOGO_LARGE} alt="InkVault" style={{height:26,width:"auto",filter:"invert(1) brightness(1.4)",marginBottom:18}}/>
         <div className="brush" style={{fontSize:22,fontWeight:800,marginBottom:4}}>{mode==="login"?"Welcome back":"Join InkVault"}</div>
         <div style={{color:"var(--paper-faint)",fontSize:13,marginBottom:22}}>{mode==="login"?"Sign in to your account":"Create your free account"}</div>
@@ -1762,7 +1030,6 @@ function AuthModal({onClose, onLogin, toast}) {
             Have an admin code from the InkVault team? Enter it above — it's single-use and grants admin access immediately. Leave it blank for a normal reader account.
           </div>
         )}
-      </div>
       </div>
     </div>
   );
@@ -2142,17 +1409,77 @@ function CoverPicker({value, onChange, toast}) {
    Profile
    ========================================================================== */
 
-function ProfilePage({user,bookmarks,toast,signOut,setView}) {
+function ProfilePage({user,bookmarks,toast,signOut,setView,updateProfile}) {
+  const [editing,setEditing]=useState(false);
+  const [usernameInput,setUsernameInput]=useState(user.username);
+  const [avatarPreview,setAvatarPreview]=useState(user.avatarUrl||null);
+  const [saving,setSaving]=useState(false);
+  const fileInputRef=useRef();
+
+  const pickAvatar=async(fileList)=>{
+    const [url]=await filesToDataUrls(fileList).catch(()=>[]);
+    if(url) setAvatarPreview(url);
+    else toast("Could not read that image","error");
+  };
+
+  const save=async()=>{
+    setSaving(true);
+    const avatarChanged = avatarPreview && avatarPreview.startsWith("data:");
+    const { error } = await updateProfile({
+      username: usernameInput,
+      avatarFile: avatarChanged ? avatarPreview : null,
+    });
+    setSaving(false);
+    if(error){ toast(error,"error"); return; }
+    toast("Profile updated","success");
+    setEditing(false);
+  };
+
   return (
     <div style={{maxWidth:700,margin:"0 auto",padding:"20px"}}>
       <div style={{display:"flex",gap:16,alignItems:"center",marginBottom:20,padding:"20px",border:"1px solid var(--line)",flexWrap:"wrap"}}>
-        <div className="avatar" style={{width:60,height:60,fontSize:20}}>{user.username.slice(0,2).toUpperCase()}</div>
+        {editing ? (
+          <div
+            onClick={()=>fileInputRef.current?.click()}
+            style={{width:60,height:60,borderRadius:"50%",overflow:"hidden",cursor:"pointer",flexShrink:0,
+              border:"1.5px dashed var(--line-strong)",display:"flex",alignItems:"center",justifyContent:"center",position:"relative"}}
+          >
+            <input ref={fileInputRef} type="file" accept="image/*" style={{display:"none"}}
+              onChange={e=>{pickAvatar(e.target.files); e.target.value="";}}/>
+            {avatarPreview ? (
+              <img src={avatarPreview} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+            ) : (
+              <span style={{fontSize:11,color:"var(--paper-faint)"}}>✎</span>
+            )}
+          </div>
+        ) : (
+          <div className="avatar" style={{width:60,height:60,fontSize:20,overflow:"hidden",padding:0}}>
+            {user.avatarUrl ? <img src={user.avatarUrl} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/> : user.username.slice(0,2).toUpperCase()}
+          </div>
+        )}
         <div style={{flex:1,minWidth:160}}>
-          <div className="brush" style={{fontSize:19,fontWeight:800}}>{user.username}</div>
+          {editing ? (
+            <input className="input" value={usernameInput} onChange={e=>setUsernameInput(e.target.value)}
+              style={{maxWidth:240,marginBottom:4}} placeholder="Username"/>
+          ) : (
+            <div className="brush" style={{fontSize:19,fontWeight:800}}>{user.username}</div>
+          )}
           {user.isAdmin&&<div className="seal-badge" style={{marginTop:5}}>● Admin</div>}
           <div style={{fontSize:13,color:"var(--paper-faint)",marginTop:4}}>{bookmarks.length} saved</div>
         </div>
-        <button className="btn btn-ghost btn-sm" onClick={()=>{signOut();toast("Signed out","default");}}>Sign out</button>
+        <div style={{display:"flex",gap:8,flexShrink:0}}>
+          {editing ? (
+            <>
+              <button className="btn btn-ghost btn-sm" onClick={()=>{setEditing(false);setUsernameInput(user.username);setAvatarPreview(user.avatarUrl||null);}}>Cancel</button>
+              <button className="btn btn-primary btn-sm" onClick={save} disabled={saving}>{saving?"Saving…":"Save"}</button>
+            </>
+          ) : (
+            <>
+              <button className="btn btn-ghost btn-sm" onClick={()=>setEditing(true)}>Edit profile</button>
+              <button className="btn btn-ghost btn-sm" onClick={()=>{signOut();toast("Signed out","default");}}>Sign out</button>
+            </>
+          )}
+        </div>
       </div>
 
       {!user.isAdmin && (
@@ -2200,16 +1527,16 @@ export default function App() {
     try {
       const { data, error } = await supabase
         .from("profiles")
-        .select("username, role")
+        .select("username, role, avatar_url")
         .eq("id", authUser.id)
         .single();
-      if (error) { setUser({ id: authUser.id, username: authUser.email, isAdmin: false }); return; }
-      setUser({ id: authUser.id, username: data.username, isAdmin: data.role === "admin" });
+      if (error) { setUser({ id: authUser.id, username: authUser.email, isAdmin: false, avatarUrl: null }); return; }
+      setUser({ id: authUser.id, username: data.username, isAdmin: data.role === "admin", avatarUrl: data.avatar_url || null });
 
       const { data: bm } = await supabase.from("bookmarks").select("series_id").eq("user_id", authUser.id);
       setBookmarksState((bm || []).map(b => b.series_id));
     } catch {
-      setUser({ id: authUser.id, username: authUser.email, isAdmin: false });
+      setUser({ id: authUser.id, username: authUser.email, isAdmin: false, avatarUrl: null });
     }
   }, []);
 
@@ -2254,7 +1581,7 @@ export default function App() {
   // (cover_url -> cover, image_url -> image, etc).
   const fetchLibrary = useCallback(async () => {
     setLibraryLoading(true);
-    const { data, error } = await supabase
+   const { data, error } = await supabase
       .from("series")
       .select(`
         id, title, author, description, type, status, genres, cover_url,
@@ -2262,7 +1589,10 @@ export default function App() {
         chapters (
           id, number, title,
           pages ( id, image_url, page_order ),
-          comments ( id, text, likes, created_at, quote_page_id, user_id )
+          comments (
+            id, text, likes, created_at, quote_page_id, user_id, attachment_url,
+            profiles ( username, avatar_url )
+          )
         )
       `)
       .order("created_at", { ascending: false });
@@ -2288,11 +1618,14 @@ export default function App() {
                 : null;
               return {
                 id: c.id,
+                userId: c.user_id,
                 user: c.profiles?.username || "unknown",
+                avatarUrl: c.profiles?.avatar_url || null,
                 text: c.text,
                 likes: c.likes,
                 date: new Date(c.created_at).toLocaleDateString(),
                 avatar: (c.profiles?.username || "??").slice(0,2).toUpperCase(),
+                attachment: c.attachment_url || null,
                 quote: quotedPage ? { pageIndex: quotedPage.page_order, thumb: quotedPage.image_url } : null,
               };
             }),
@@ -2348,12 +1681,14 @@ export default function App() {
     if (meta?.type === "delete") {
       await supabase.from("comments").delete().eq("id", meta.commentId);
     } else if (meta?.type === "insert") {
-      await supabase.from("comments").insert({
+      const { error } = await supabase.from("comments").insert({
         chapter_id: chapterId,
         user_id: user.id,
         text: meta.text,
         quote_page_id: meta.quotePageId || null,
+        attachment_url: meta.attachmentUrl || null,
       });
+      if (error) throw error;
     }
     fetchLibrary();
   },[user, fetchLibrary]);
@@ -2393,7 +1728,7 @@ export default function App() {
       <main className="main-content">
         {view==="home"&&<HomePage library={library} libraryLoading={libraryLoading} bookmarks={bookmarks} setBookmarks={setBookmarks} toast={toast} setView={setView} setCurrentManga={setCurrentManga}/>}
         {view==="detail"&&currentManga&&<DetailPage manga={currentManga} setManga={()=>{}} bookmarks={bookmarks} setBookmarks={setBookmarks} toast={toast} setView={setView} setReaderState={setReaderState} user={user}/>}
-        {view==="profile"&&(user?<ProfilePage user={user} bookmarks={bookmarks} toast={toast} signOut={signOut} setView={setView}/>:(
+        {view==="profile"&&(user?<ProfilePage user={user} bookmarks={bookmarks} toast={toast} signOut={signOut} setView={setView} updateProfile={updateProfile}/>:(
           <div style={{textAlign:"center",padding:"80px 20px"}}>
             <div className="brush" style={{fontSize:36,marginBottom:14}}>人</div>
             <div className="brush" style={{fontSize:20,fontWeight:800,marginBottom:8}}>Not signed in</div>
