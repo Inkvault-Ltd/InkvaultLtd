@@ -745,9 +745,23 @@ function ReaderPage({readerState,setReaderState,toast,setView,onUpdateChapterCom
     toast(`Page ${currentPage+1} tagged`, "success");
   };
 
+  const [pendingJump, setPendingJump] = useState(null);
+  useEffect(() => {
+    if (pendingJump == null) return;
+    const t = setTimeout(() => {
+      const target = pageRefs.current[pendingJump];
+      if (target) {
+        target.scrollIntoView({block:"center", behavior:"smooth"});
+        setArrivalKey(pendingJump + "-" + Date.now());
+        setPendingJump(null);
+      }
+    }, 350);
+    return () => clearTimeout(t);
+  }, [pendingJump]);
+
   const handleJumpFromComment = (pageIndex) => {
     setShowComments(false);
-    setReaderState({manga, chapterIdx, jumpToPage: pageIndex + "_" + Date.now()});
+    setPendingJump(pageIndex);
   };
   // jumpToPage carries a unique suffix so repeated jumps to the same page re-trigger.
 
