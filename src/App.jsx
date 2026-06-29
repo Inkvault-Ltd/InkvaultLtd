@@ -744,36 +744,51 @@ function ReaderPage({readerState,setReaderState,toast,setView,onUpdateChapterCom
     toast(`Page ${currentPage+1} tagged`, "success");
   };
 
+  // pendingJump carries a unique suffix so jumping to the same page twice in
+  // a row still re-triggers the effect below (two clicks on the same quote
+  // card otherwise wouldn't change state at all).
   const [pendingJump, setPendingJump] = useState(null);
-  useEffect(() => {
-    if (pendingJump == null) return;
-    const t = setTimeout(() => {
-      const target = pageRefs.current[pendingJump];
-      if (target) {
-        target.scrollIntoView({block:"center", behavior:"smooth"});
-        setArrivalKey(pendingJump + "-" + Date.now());
-        setPendingJump(null);
-      }
-    }, 350);
-    return () => clearTimeout(t);
-  }, [pendingJump]);
 
   const handleJumpFromComment = (pageIndex) => {
     setShowComments(false);
-    setPendingJump(pageIndex);
+    setPendingJump(pageIndex + "_" + Date.now());
   };
-  useEffect(()=>{
-    if(pendingJump==null)return;
-    const t=setTimeout(()=>{
-      const target=pageRefs.current[pendingJump];
-      if(target){
-        target.scrollIntoView({block:"center",behavior:"smooth"});
-        setArrivalKey(pendingJump+"-"+Date.now());
+
+  useEffect(() => {
+    if (pendingJump == null) return;
+    const idx = parseInt(String(pendingJump).split("_")[0], 10);
+
+    let attempts = 0;
+    let rafId;
+    let cancelled = false;
+
+    // Poll (via requestAnimationFrame, capped at ~2s) until the target
+    // page's DOM node exists and the drawer has actually closed, instead of
+    // guessing a fixed timeout. This is what makes the jump reliable across
+    // dev and production builds, where commit/paint timing differs.
+    const tryScroll = () => {
+      if (cancelled) return;
+      const target = pageRefs.current[idx];
+      const drawerStillOpen = document.querySelector(".drawer-overlay");
+      if (target && !drawerStillOpen) {
+        target.scrollIntoView({ block: "center", behavior: "smooth" });
+        setArrivalKey(idx + "-" + Date.now());
+        setPendingJump(null);
+        return;
+      }
+      attempts++;
+      if (attempts < 120) { // ~2s at 60fps
+        rafId = requestAnimationFrame(tryScroll);
+      } else {
+        // Give up gracefully rather than jumping silently forever; still
+        // clear pendingJump so a future click can retry from a clean state.
         setPendingJump(null);
       }
-    },350);
-    return()=>clearTimeout(t);
-  },[pendingJump]);
+    };
+
+    rafId = requestAnimationFrame(tryScroll);
+    return () => { cancelled = true; if (rafId) cancelAnimationFrame(rafId); };
+  }, [pendingJump]);
 
   return (
     <div style={{position:"fixed",inset:0,background:bgColor,display:"flex",flexDirection:"column",zIndex:500}}>
