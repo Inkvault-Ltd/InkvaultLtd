@@ -607,46 +607,21 @@ function DetailPage({manga,setManga,bookmarks,setBookmarks,toast,setView,setRead
 function ChapterComments({chapter, mangaId, onUpdateComments, user, toast, pendingQuote, onConsumeQuote, onJumpToPage}) {
   const [text,setText]=useState("");
   const [posting,setPosting]=useState(false);
-  const [attachment,setAttachment]=useState(null); // data URL preview, uploaded on send
-  const [gifQuery,setGifQuery]=useState("");
-  const [showGifPicker,setShowGifPicker]=useState(false);
-  const fileInputRef=useRef();
   const comments = chapter.comments || [];
-
-  const pickAttachment = async (fileList) => {
-    const [url] = await filesToDataUrls(fileList).catch(()=>[]);
-    if (url) { setAttachment(url); setShowGifPicker(false); }
-    else toast("Could not read that file","error");
-  };
 
   const post = async () => {
     if(!user){toast("Sign in to comment","warn");return;}
-    if(!text.trim() && !pendingQuote && !attachment)return;
+    if(!text.trim() && !pendingQuote)return;
     setPosting(true);
-    try {
-      let attachmentUrl = null;
-      if (attachment) {
-        // GIFs picked from the picker below are already hosted URLs; only
-        // local file uploads (data: URLs) need to go to Storage first.
-        attachmentUrl = attachment.startsWith("data:")
-          ? await uploadDataUrlToStorage(attachment, "comment")
-          : attachment;
-      }
-      await onUpdateComments(mangaId, chapter.id, null, {
-        type: "insert",
-        text: text.trim(),
-        quotePageId: pendingQuote?.pageId || null,
-        attachmentUrl,
-      });
-      setText("");
-      setAttachment(null);
-      if(pendingQuote) onConsumeQuote();
-      toast("Comment posted","success");
-    } catch (err) {
-      toast(err.message || "Could not post comment","error");
-    } finally {
-      setPosting(false);
-    }
+    await onUpdateComments(mangaId, chapter.id, null, {
+      type: "insert",
+      text: text.trim(),
+      quotePageId: pendingQuote?.pageId || null,
+    });
+    setPosting(false);
+    setText("");
+    if(pendingQuote) onConsumeQuote();
+    toast("Comment posted","success");
   };
 
   return (
@@ -663,30 +638,7 @@ function ChapterComments({chapter, mangaId, onUpdateComments, user, toast, pendi
       {user ? (
         <div style={{marginBottom:20}}>
           <textarea className="input" rows={3} placeholder={pendingQuote ? "Add a comment about this page…" : "Share your thoughts on this chapter…"} value={text} onChange={e=>setText(e.target.value)} style={{resize:"vertical",marginBottom:8}}/>
-
-          {attachment && (
-            <div style={{position:"relative",display:"inline-block",marginBottom:8}}>
-              <img src={attachment} alt="attachment preview" style={{maxHeight:120,maxWidth:160,border:"1px solid var(--line-strong)",display:"block"}}/>
-              <button onClick={()=>setAttachment(null)}
-                style={{position:"absolute",top:-7,right:-7,background:"var(--seal)",color:"#fff",width:20,height:20,fontSize:12,lineHeight:1,border:"none",borderRadius:"50%"}}>✕</button>
-            </div>
-          )}
-
-          {showGifPicker && (
-            <div style={{border:"1px solid var(--line-strong)",padding:10,marginBottom:8}}>
-              <input className="input" placeholder="Search GIFs… (e.g. shocked, applause)" value={gifQuery}
-                onChange={e=>setGifQuery(e.target.value)} style={{marginBottom:8}}/>
-              <GifResults query={gifQuery} onPick={(url)=>{setAttachment(url);setShowGifPicker(false);}}/>
-            </div>
-          )}
-
-          <div style={{display:"flex",gap:8,alignItems:"center"}}>
-            <input ref={fileInputRef} type="file" accept="image/*" style={{display:"none"}}
-              onChange={e=>{pickAttachment(e.target.files); e.target.value="";}}/>
-            <button className="btn btn-ghost btn-sm" onClick={()=>fileInputRef.current?.click()} title="Attach an image">🖼 Image</button>
-            <button className={`btn btn-ghost btn-sm ${showGifPicker?"active":""}`} onClick={()=>setShowGifPicker(s=>!s)} title="Attach a GIF">GIF</button>
-            <button className="btn btn-primary btn-sm" onClick={post} disabled={posting} style={{marginLeft:"auto"}}>{posting ? "Posting…" : "Post Comment"}</button>
-          </div>
+          <button className="btn btn-primary btn-sm" onClick={post} disabled={posting}>{posting ? "Posting…" : "Post Comment"}</button>
         </div>
       ) : (
         <div style={{padding:"16px",border:"1px solid var(--line)",marginBottom:16,fontSize:13,color:"var(--paper-faint)"}}>Sign in to leave a comment</div>
@@ -709,9 +661,7 @@ function CommentItem({comment,user,toast,onDelete,onJumpToPage}) {
   const isMine=user?.username===comment.user;
   return (
     <div className="comment" onContextMenu={e=>{e.preventDefault();setCtx({x:e.clientX,y:e.clientY});}}>
-      <div className="avatar" style={{overflow:"hidden",padding:0}}>
-        {comment.avatarUrl ? <img src={comment.avatarUrl} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/> : comment.avatar}
-      </div>
+      <div className="avatar">{comment.avatar}</div>
       <div style={{flex:1,minWidth:0}}>
         <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:4}}>
           <span style={{fontWeight:600,fontSize:13}}>{comment.user}</span>
@@ -719,9 +669,6 @@ function CommentItem({comment,user,toast,onDelete,onJumpToPage}) {
           <span style={{fontSize:11,color:"var(--paper-faint)",marginLeft:"auto"}}>{comment.date}</span>
         </div>
         {comment.text && <p style={{fontSize:14,lineHeight:1.5,wordBreak:"break-word"}}>{comment.text}</p>}
-        {comment.attachment && (
-          <img src={comment.attachment} alt="" style={{maxWidth:220,maxHeight:220,border:"1px solid var(--line-strong)",display:"block",marginTop:8}}/>
-        )}
         {comment.quote && onJumpToPage && (
           <div className="quote-card" onClick={()=>onJumpToPage(comment.quote.pageIndex)} title={`Jump to Page ${comment.quote.pageIndex+1}`}>
             <div className="quote-thumb-wrap">
@@ -1409,77 +1356,17 @@ function CoverPicker({value, onChange, toast}) {
    Profile
    ========================================================================== */
 
-function ProfilePage({user,bookmarks,toast,signOut,setView,updateProfile}) {
-  const [editing,setEditing]=useState(false);
-  const [usernameInput,setUsernameInput]=useState(user.username);
-  const [avatarPreview,setAvatarPreview]=useState(user.avatarUrl||null);
-  const [saving,setSaving]=useState(false);
-  const fileInputRef=useRef();
-
-  const pickAvatar=async(fileList)=>{
-    const [url]=await filesToDataUrls(fileList).catch(()=>[]);
-    if(url) setAvatarPreview(url);
-    else toast("Could not read that image","error");
-  };
-
-  const save=async()=>{
-    setSaving(true);
-    const avatarChanged = avatarPreview && avatarPreview.startsWith("data:");
-    const { error } = await updateProfile({
-      username: usernameInput,
-      avatarFile: avatarChanged ? avatarPreview : null,
-    });
-    setSaving(false);
-    if(error){ toast(error,"error"); return; }
-    toast("Profile updated","success");
-    setEditing(false);
-  };
-
+function ProfilePage({user,bookmarks,toast,signOut,setView}) {
   return (
     <div style={{maxWidth:700,margin:"0 auto",padding:"20px"}}>
       <div style={{display:"flex",gap:16,alignItems:"center",marginBottom:20,padding:"20px",border:"1px solid var(--line)",flexWrap:"wrap"}}>
-        {editing ? (
-          <div
-            onClick={()=>fileInputRef.current?.click()}
-            style={{width:60,height:60,borderRadius:"50%",overflow:"hidden",cursor:"pointer",flexShrink:0,
-              border:"1.5px dashed var(--line-strong)",display:"flex",alignItems:"center",justifyContent:"center",position:"relative"}}
-          >
-            <input ref={fileInputRef} type="file" accept="image/*" style={{display:"none"}}
-              onChange={e=>{pickAvatar(e.target.files); e.target.value="";}}/>
-            {avatarPreview ? (
-              <img src={avatarPreview} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
-            ) : (
-              <span style={{fontSize:11,color:"var(--paper-faint)"}}>✎</span>
-            )}
-          </div>
-        ) : (
-          <div className="avatar" style={{width:60,height:60,fontSize:20,overflow:"hidden",padding:0}}>
-            {user.avatarUrl ? <img src={user.avatarUrl} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/> : user.username.slice(0,2).toUpperCase()}
-          </div>
-        )}
+        <div className="avatar" style={{width:60,height:60,fontSize:20}}>{user.username.slice(0,2).toUpperCase()}</div>
         <div style={{flex:1,minWidth:160}}>
-          {editing ? (
-            <input className="input" value={usernameInput} onChange={e=>setUsernameInput(e.target.value)}
-              style={{maxWidth:240,marginBottom:4}} placeholder="Username"/>
-          ) : (
-            <div className="brush" style={{fontSize:19,fontWeight:800}}>{user.username}</div>
-          )}
+          <div className="brush" style={{fontSize:19,fontWeight:800}}>{user.username}</div>
           {user.isAdmin&&<div className="seal-badge" style={{marginTop:5}}>● Admin</div>}
           <div style={{fontSize:13,color:"var(--paper-faint)",marginTop:4}}>{bookmarks.length} saved</div>
         </div>
-        <div style={{display:"flex",gap:8,flexShrink:0}}>
-          {editing ? (
-            <>
-              <button className="btn btn-ghost btn-sm" onClick={()=>{setEditing(false);setUsernameInput(user.username);setAvatarPreview(user.avatarUrl||null);}}>Cancel</button>
-              <button className="btn btn-primary btn-sm" onClick={save} disabled={saving}>{saving?"Saving…":"Save"}</button>
-            </>
-          ) : (
-            <>
-              <button className="btn btn-ghost btn-sm" onClick={()=>setEditing(true)}>Edit profile</button>
-              <button className="btn btn-ghost btn-sm" onClick={()=>{signOut();toast("Signed out","default");}}>Sign out</button>
-            </>
-          )}
-        </div>
+        <button className="btn btn-ghost btn-sm" onClick={()=>{signOut();toast("Signed out","default");}}>Sign out</button>
       </div>
 
       {!user.isAdmin && (
@@ -1527,16 +1414,16 @@ export default function App() {
     try {
       const { data, error } = await supabase
         .from("profiles")
-        .select("username, role, avatar_url")
+        .select("username, role")
         .eq("id", authUser.id)
         .single();
-      if (error) { setUser({ id: authUser.id, username: authUser.email, isAdmin: false, avatarUrl: null }); return; }
-      setUser({ id: authUser.id, username: data.username, isAdmin: data.role === "admin", avatarUrl: data.avatar_url || null });
+      if (error) { setUser({ id: authUser.id, username: authUser.email, isAdmin: false }); return; }
+      setUser({ id: authUser.id, username: data.username, isAdmin: data.role === "admin" });
 
       const { data: bm } = await supabase.from("bookmarks").select("series_id").eq("user_id", authUser.id);
       setBookmarksState((bm || []).map(b => b.series_id));
     } catch {
-      setUser({ id: authUser.id, username: authUser.email, isAdmin: false, avatarUrl: null });
+      setUser({ id: authUser.id, username: authUser.email, isAdmin: false });
     }
   }, []);
 
@@ -1581,7 +1468,7 @@ export default function App() {
   // (cover_url -> cover, image_url -> image, etc).
   const fetchLibrary = useCallback(async () => {
     setLibraryLoading(true);
-   const { data, error } = await supabase
+    const { data, error } = await supabase
       .from("series")
       .select(`
         id, title, author, description, type, status, genres, cover_url,
@@ -1589,10 +1476,7 @@ export default function App() {
         chapters (
           id, number, title,
           pages ( id, image_url, page_order ),
-          comments (
-            id, text, likes, created_at, quote_page_id, user_id, attachment_url,
-            profiles ( username, avatar_url )
-          )
+          comments ( id, text, likes, created_at, quote_page_id, user_id )
         )
       `)
       .order("created_at", { ascending: false });
@@ -1618,14 +1502,11 @@ export default function App() {
                 : null;
               return {
                 id: c.id,
-                userId: c.user_id,
                 user: c.profiles?.username || "unknown",
-                avatarUrl: c.profiles?.avatar_url || null,
                 text: c.text,
                 likes: c.likes,
                 date: new Date(c.created_at).toLocaleDateString(),
                 avatar: (c.profiles?.username || "??").slice(0,2).toUpperCase(),
-                attachment: c.attachment_url || null,
                 quote: quotedPage ? { pageIndex: quotedPage.page_order, thumb: quotedPage.image_url } : null,
               };
             }),
@@ -1681,14 +1562,12 @@ export default function App() {
     if (meta?.type === "delete") {
       await supabase.from("comments").delete().eq("id", meta.commentId);
     } else if (meta?.type === "insert") {
-      const { error } = await supabase.from("comments").insert({
+      await supabase.from("comments").insert({
         chapter_id: chapterId,
         user_id: user.id,
         text: meta.text,
         quote_page_id: meta.quotePageId || null,
-        attachment_url: meta.attachmentUrl || null,
       });
-      if (error) throw error;
     }
     fetchLibrary();
   },[user, fetchLibrary]);
@@ -1728,7 +1607,7 @@ export default function App() {
       <main className="main-content">
         {view==="home"&&<HomePage library={library} libraryLoading={libraryLoading} bookmarks={bookmarks} setBookmarks={setBookmarks} toast={toast} setView={setView} setCurrentManga={setCurrentManga}/>}
         {view==="detail"&&currentManga&&<DetailPage manga={currentManga} setManga={()=>{}} bookmarks={bookmarks} setBookmarks={setBookmarks} toast={toast} setView={setView} setReaderState={setReaderState} user={user}/>}
-        {view==="profile"&&(user?<ProfilePage user={user} bookmarks={bookmarks} toast={toast} signOut={signOut} setView={setView} updateProfile={updateProfile}/>:(
+        {view==="profile"&&(user?<ProfilePage user={user} bookmarks={bookmarks} toast={toast} signOut={signOut} setView={setView}/>:(
           <div style={{textAlign:"center",padding:"80px 20px"}}>
             <div className="brush" style={{fontSize:36,marginBottom:14}}>人</div>
             <div className="brush" style={{fontSize:20,fontWeight:800,marginBottom:8}}>Not signed in</div>
