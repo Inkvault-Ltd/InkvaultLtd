@@ -1532,7 +1532,7 @@ export default function App() {
                 likes: c.likes,
                 date: new Date(c.created_at).toLocaleDateString(),
                 avatar: (c.profiles?.username || "??").slice(0,2).toUpperCase(),
-                quote: quotedPage ? { pageIndex: quotedPage.order, thumb: quotedPage.image_url } : null,
+                quote: quotedPage ? { pageIndex: quotedPage.page_order, thumb: quotedPage.image_url } : null,
               };
             }),
         })),
