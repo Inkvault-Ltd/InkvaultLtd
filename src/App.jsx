@@ -75,7 +75,7 @@ const GLOBAL_CSS = `
   @keyframes drip { 0% { height: 0; opacity: 0.8; } 100% { height: var(--drip-h, 18px); opacity: 0; } }
   @keyframes shimmerInk { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
   @keyframes brushBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
-  @keyframes splashOverlayIn { 0% { transform: scale(0); opacity: 0.95; } 55% { transform: scale(1.4); opacity: 0.9; } 100% { transform: scale(2.2); opacity: 0; } }
+  @keyframes splashOverlayIn { 0% { transform: scale(0.1); opacity: 0; } 20% { opacity: 1; } 60% { transform: scale(1.6); opacity: 0.85; } 100% { transform: scale(2.8); opacity: 0; } }
   @keyframes popIn { 0% { transform: scale(0.85); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
 
   .animate-fadeUp { animation: fadeUp 0.4s ease forwards; }
@@ -194,7 +194,7 @@ const GLOBAL_CSS = `
   @media (min-width: 768px) { .quote-fab { bottom: 28px; } }
 
   /* ---- ink splash arrival overlay (plays over a jumped-to page) ---- */
-  .splash-arrival { position: absolute; inset: 0; pointer-events: none; display: flex; align-items: center; justify-content: center; z-index: 5; }
+  .splash-arrival { position: absolute; inset: 0; pointer-events: none; display: flex; align-items: center; justify-content: center; z-index: 10; overflow: hidden; }
 `;
 
 /* ============================================================================
@@ -248,13 +248,28 @@ function FullscreenInkLoader() {
 function SplashArrivalOverlay({ onDone }) {
   const frame = useSplashFrame(ASSET_SPLASH_FRAMES.length, true);
   useEffect(() => {
-    const t = setTimeout(() => onDone?.(), 850);
+    const t = setTimeout(() => onDone?.(), 900);
     return () => clearTimeout(t);
   }, [onDone]);
   return (
     <div className="splash-arrival">
-      <img src={ASSET_SPLASH_FRAMES[frame]} alt="" width={220} height={220}
-        style={{ animation: "splashOverlayIn 0.8s cubic-bezier(.2,.85,.3,1) forwards" }} />
+      <div style={{
+        animation: "splashOverlayIn 0.85s cubic-bezier(.2,.85,.3,1) forwards",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        pointerEvents: "none",
+      }}>
+        <img
+          src={ASSET_SPLASH_FRAMES[frame]}
+          alt=""
+          width={260}
+          height={260}
+          style={{
+            filter: "invert(1) brightness(2)",
+            mixBlendMode: "screen",
+            display: "block",
+          }}
+        />
+      </div>
     </div>
   );
 }
@@ -747,48 +762,20 @@ function ReaderPage({readerState,setReaderState,toast,setView,onUpdateChapterCom
   // pendingJump carries a unique suffix so jumping to the same page twice in
   // a row still re-triggers the effect below (two clicks on the same quote
   // card otherwise wouldn't change state at all).
-  const [pendingJump, setPendingJump] = useState(null);
+   
 
-  const handleJumpFromComment = (pageIndex) => {
+   const handleJumpFromComment = (pageIndex) => {
     setShowComments(false);
-    setPendingJump(pageIndex + "_" + Date.now());
+    setTimeout(() => {
+      const target = pageRefs.current[pageIndex];
+      if (target) {
+        target.scrollIntoView({ block: "center", behavior: "smooth" });
+        setTimeout(() => setArrivalKey(pageIndex + "-" + Date.now()), 400);
+      }
+    }, 320);
   };
 
-  useEffect(() => {
-    if (pendingJump == null) return;
-    const idx = parseInt(String(pendingJump).split("_")[0], 10);
-
-    let attempts = 0;
-    let rafId;
-    let cancelled = false;
-
-    // Poll (via requestAnimationFrame, capped at ~2s) until the target
-    // page's DOM node exists and the drawer has actually closed, instead of
-    // guessing a fixed timeout. This is what makes the jump reliable across
-    // dev and production builds, where commit/paint timing differs.
-    const tryScroll = () => {
-      if (cancelled) return;
-      const target = pageRefs.current[idx];
-      const drawerStillOpen = document.querySelector(".drawer-overlay");
-      if (target && !drawerStillOpen) {
-        target.scrollIntoView({ block: "center", behavior: "smooth" });
-        setArrivalKey(idx + "-" + Date.now());
-        setPendingJump(null);
-        return;
-      }
-      attempts++;
-      if (attempts < 120) { // ~2s at 60fps
-        rafId = requestAnimationFrame(tryScroll);
-      } else {
-        // Give up gracefully rather than jumping silently forever; still
-        // clear pendingJump so a future click can retry from a clean state.
-        setPendingJump(null);
-      }
-    };
-
-    rafId = requestAnimationFrame(tryScroll);
-    return () => { cancelled = true; if (rafId) cancelAnimationFrame(rafId); };
-  }, [pendingJump]);
+   
 
   return (
     <div style={{position:"fixed",inset:0,background:bgColor,display:"flex",flexDirection:"column",zIndex:500}}>

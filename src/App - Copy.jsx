@@ -700,7 +700,7 @@ function CommentItem({comment,user,toast,onDelete,onJumpToPage}) {
    ========================================================================== */
 
 function ReaderPage({readerState,setReaderState,toast,setView,onUpdateChapterComments,user}) {
-  const {manga,chapterIdx,openComments,jumpToPage}=readerState;
+  const {manga,chapterIdx,openComments}=readerState;
   const chapter=manga.chapters[chapterIdx];
   const pages = chapter.pages;
   const [progress,setProgress]=useState(0);
@@ -715,7 +715,6 @@ function ReaderPage({readerState,setReaderState,toast,setView,onUpdateChapterCom
   const [showComments,setShowComments]=useState(!!openComments);
   const [pendingQuote,setPendingQuote]=useState(null);
   const [arrivalKey,setArrivalKey]=useState(null);
-
   useEffect(()=>{
     const el=containerRef.current; if(!el) return;
     const onScroll=()=>{
@@ -745,25 +744,51 @@ function ReaderPage({readerState,setReaderState,toast,setView,onUpdateChapterCom
     toast(`Page ${currentPage+1} tagged`, "success");
   };
 
+  // pendingJump carries a unique suffix so jumping to the same page twice in
+  // a row still re-triggers the effect below (two clicks on the same quote
+  // card otherwise wouldn't change state at all).
+  const [pendingJump, setPendingJump] = useState(null);
+
   const handleJumpFromComment = (pageIndex) => {
     setShowComments(false);
-    setReaderState({manga, chapterIdx, jumpToPage: pageIndex + "_" + Date.now()});
+    setPendingJump(pageIndex + "_" + Date.now());
   };
-  // jumpToPage carries a unique suffix so repeated jumps to the same page re-trigger.
 
-  useEffect(()=>{
-    if (jumpToPage == null) return;
-    const idx = typeof jumpToPage === "string" ? parseInt(jumpToPage.split("_")[0],10) : jumpToPage;
-    const t = setTimeout(()=>{
+  useEffect(() => {
+    if (pendingJump == null) return;
+    const idx = parseInt(String(pendingJump).split("_")[0], 10);
+
+    let attempts = 0;
+    let rafId;
+    let cancelled = false;
+
+    // Poll (via requestAnimationFrame, capped at ~2s) until the target
+    // page's DOM node exists and the drawer has actually closed, instead of
+    // guessing a fixed timeout. This is what makes the jump reliable across
+    // dev and production builds, where commit/paint timing differs.
+    const tryScroll = () => {
+      if (cancelled) return;
       const target = pageRefs.current[idx];
-      if (target) {
-        target.scrollIntoView({block:"center"});
-        setArrivalKey(idx+"-"+Date.now());
+      const drawerStillOpen = document.querySelector(".drawer-overlay");
+      if (target && !drawerStillOpen) {
+        target.scrollIntoView({ block: "center", behavior: "smooth" });
+        setArrivalKey(idx + "-" + Date.now());
+        setPendingJump(null);
+        return;
       }
-    }, 80);
-    return ()=>clearTimeout(t);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[jumpToPage]);
+      attempts++;
+      if (attempts < 120) { // ~2s at 60fps
+        rafId = requestAnimationFrame(tryScroll);
+      } else {
+        // Give up gracefully rather than jumping silently forever; still
+        // clear pendingJump so a future click can retry from a clean state.
+        setPendingJump(null);
+      }
+    };
+
+    rafId = requestAnimationFrame(tryScroll);
+    return () => { cancelled = true; if (rafId) cancelAnimationFrame(rafId); };
+  }, [pendingJump]);
 
   return (
     <div style={{position:"fixed",inset:0,background:bgColor,display:"flex",flexDirection:"column",zIndex:500}}>
