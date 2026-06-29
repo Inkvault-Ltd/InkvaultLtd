@@ -811,7 +811,7 @@ function ReaderPage({readerState,setReaderState,toast,setView,onUpdateChapterCom
             <div key={page.id} ref={el=>pageRefs.current[i]=el} style={{position:"relative"}}>
               <LazyImg src={page.image} alt={`Page ${i+1}`} style={{width:"100%",aspectRatio:"2/3",display:"block"}}/>
               {arrivalKey === String(i) && (
-                <SplashArrivalOverlay onDone={()=>setArrivalKey(null)} />
+                <SplashArrivalOverlay key={arrivalKey} onDone={()=>setArrivalKey(null)} />
               )}
             </div>
           ))}
