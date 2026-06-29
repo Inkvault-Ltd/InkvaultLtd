@@ -1463,6 +1463,52 @@ function AuthModal({onClose, onLogin, toast}) {
     </div>
   );
 }
+function AuthTrailer() {
+  const canvasRef = useRef(null);
+  useEffect(() => {
+    const C = canvasRef.current; if(!C) return;
+    const ctx = C.getContext('2d');
+    const W = C.width, H = C.height;
+    const noiseC = document.createElement('canvas');
+    noiseC.width=W; noiseC.height=H;
+    const nctx = noiseC.getContext('2d');
+    const id = nctx.createImageData(W,H);
+    for(let i=0;i<id.data.length;i+=4){const v=Math.floor(Math.random()*25);id.data[i]=id.data[i+1]=id.data[i+2]=v;id.data[i+3]=Math.random()*35;}
+    nctx.putImageData(id,0,0);
+    const PAPER='#F4F2ED',SEAL='#C8312A',PAPER_DIM='#B9B6AC',PAPER_FAINT='#6E6C65';
+    const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+    const easeOut=t=>1-Math.pow(1-t,3);
+    const easeOutBack=t=>{const c1=1.70158,c3=c1+1;return 1+c3*Math.pow(t-1,3)+c1*Math.pow(t-1,2);};
+    const mapRange=(t,a,b)=>clamp((t-a)/(b-a),0,1);
+    const lerp=(a,b,t)=>a+(b-a)*t;
+    let particles=[];
+    const spawnP=(x,y,n,opts)=>{for(let i=0;i<n&&particles.length<60;i++)particles.push({x,y,vx:(Math.random()-.5)*(opts.speed||2),vy:(Math.random()-.5)*(opts.speed||2),life:1,decay:opts.decay||.018,size:opts.size||Math.random()*2+.8,color:opts.color||PAPER,gravity:opts.gravity||0});};
+    const bg=(c,a=1)=>{ctx.save();ctx.globalAlpha=a;ctx.fillStyle=c;ctx.fillRect(0,0,W,H);ctx.restore();};
+    const grain=(a=.03)=>{ctx.save();ctx.globalAlpha=a;ctx.drawImage(noiseC,0,0);ctx.restore();};
+    const vignette=(s=.7)=>{const g=ctx.createRadialGradient(W/2,H/2,H*.15,W/2,H/2,H*.65);g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(1,`rgba(0,0,0,${s})`);ctx.fillStyle=g;ctx.fillRect(0,0,W,H);};
+    const sf=(size,weight,family='sans-serif')=>{ctx.font=`${weight} ${size}px ${family}`;};
+    const animText=(text,cx,cy,t,opts={})=>{
+      const{color=PAPER,size=28,weight='700',family='serif'}=opts;
+      sf(size,weight,family);ctx.textBaseline='middle';ctx.textAlign='center';
+      const tw=ctx.measureText(text).width;let ox=cx-tw/2;
+      for(let i=0;i<text.length;i++){const ch=text[i];const p=clamp((t-i*.05)/.3,0,1);ctx.save();ctx.globalAlpha=p;ctx.fillStyle=color;ctx.translate(ox,cy+(1-easeOut(p))*12);ctx.fillText(ch,ctx.measureText(ch).width/2,0);ctx.restore();ox+=ctx.measureText(ch).width;}
+    };
+    const scene0=lt=>{bg('#000');const logoT=mapRange(lt,.4,1);if(logoT>0){ctx.save();ctx.globalAlpha=easeOut(logoT)*.85;ctx.fillStyle=PAPER;sf(Math.round(lerp(48,38,easeOut(logoT))),'800','serif');ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('InkVault',W/2,H/2);ctx.restore();}const tagT=mapRange(lt,.65,1);if(tagT>0){ctx.save();ctx.globalAlpha=easeOut(tagT)*.6;ctx.fillStyle=PAPER_DIM;sf(10,'600');ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('WHERE STORIES LIVE IN INK',W/2,H/2+38);ctx.restore();}vignette(.88);grain(.04);};
+    const scene1=lt=>{bg('#0A0A0A');animText('Manga without',W/2,H*.42,mapRange(lt,.1,.55)*8,{size:36,weight:'800'});const h2t=mapRange(lt,.22,.62);if(h2t>0){ctx.save();ctx.globalAlpha=easeOut(clamp(h2t*3,0,1));ctx.fillStyle=SEAL;sf(36,'800','serif');ctx.textAlign='center';ctx.textBaseline='middle';const sc=lerp(1.12,1,easeOutBack(clamp(h2t*2,0,1)));ctx.translate(W/2,H*.64);ctx.scale(sc,sc);ctx.fillText('compromise.',0,0);ctx.restore();}vignette(.55);grain(.03);};
+    const scene2=lt=>{bg('#0A0A0A');const stats=[{label:'Series',val:12000,x:W*.22},{label:'Chapters',val:240000,x:W*.5,hi:true},{label:'Readers',val:98000,x:W*.78}];stats.forEach((s,i)=>{const delay=i*.12;const p=mapRange(lt,.05+delay,.55+delay);if(p<=0)return;const alpha=easeOut(p);const barH=easeOut(mapRange(lt,.1+delay,.65+delay))*H*.3;ctx.save();ctx.globalAlpha=alpha*.4;ctx.fillStyle=s.hi?SEAL:PAPER;ctx.fillRect(s.x-1,H*.62-barH,2,barH);ctx.restore();const nv=Math.floor(easeOut(mapRange(lt,.1+delay,.75+delay))*s.val);const ns=nv>=1000?Math.floor(nv/1000)+'K':String(nv);ctx.save();ctx.globalAlpha=alpha;ctx.fillStyle=s.hi?SEAL:PAPER;sf(28,'800','serif');ctx.textAlign='center';ctx.textBaseline='alphabetic';ctx.fillText(ns,s.x,H*.62);ctx.restore();ctx.save();ctx.globalAlpha=alpha*.65;ctx.fillStyle=PAPER_DIM;sf(10,'600');ctx.textAlign='center';ctx.textBaseline='top';ctx.fillText(s.label.toUpperCase(),s.x,H*.64);ctx.restore();if(Math.random()<.2)spawnP(s.x,H*.62-barH,1,{speed:2,decay:.05,size:1.5,color:s.hi?SEAL:PAPER,gravity:-.02});});vignette(.5);grain(.03);};
+    const scene3=lt=>{bg('#000');ctx.save();for(let i=0;i<20;i++){const angle=i/20*Math.PI*2;const p=mapRange(lt,.08,.55);const len=easeOut(p)*H*.7;ctx.strokeStyle=PAPER;ctx.lineWidth=.4;ctx.globalAlpha=easeOut(p)*.05;ctx.beginPath();ctx.moveTo(W/2,H/2);ctx.lineTo(W/2+Math.cos(angle)*len,H/2+Math.sin(angle)*len);ctx.stroke();}ctx.restore();vignette(.92);const logoT=mapRange(lt,0,.38);if(logoT>0){const sc=lerp(0,1,easeOutBack(logoT));ctx.save();ctx.translate(W/2,H*.35);ctx.scale(sc,sc);ctx.translate(-W/2,-H*.35);ctx.globalAlpha=easeOut(logoT);ctx.fillStyle=PAPER;sf(42,'800','serif');ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('InkVault',W/2,H*.35);ctx.restore();}const tagT=mapRange(lt,.32,.6);if(tagT>0)animText('Your vault is waiting.',W/2,H*.55,tagT*8,{size:18,weight:'800'});const ctaT=mapRange(lt,.62,.86);if(ctaT>0){ctx.save();ctx.globalAlpha=easeOut(ctaT);const bW=164,bH=36,bX=W/2-bW-8,bY=H*.76;ctx.fillStyle=PAPER;ctx.fillRect(bX,bY,bW,bH);ctx.fillStyle='#0A0A0A';sf(10,'700');ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('START READING FREE →',bX+bW/2,bY+bH/2);ctx.strokeStyle='rgba(244,242,237,0.28)';ctx.lineWidth=1;ctx.strokeRect(W/2+8,bY,bW,bH);ctx.fillStyle=PAPER_DIM;ctx.fillText('BROWSE LIBRARY',W/2+8+bW/2,bY+bH/2);ctx.restore();}const fadeT=mapRange(lt,.87,1);bg(`rgba(0,0,0,${fadeT*fadeT})`);grain(.04);};
+    const TOTAL=1320,SCENES=[{s:0,e:150},{s:150,e:510},{s:510,e:810},{s:810,e:1320}],FNS=[scene0,scene1,scene2,scene3];
+    const INTERVAL=1000/30;let frame=0,raf=null,lastT=0;
+    const loop=ts=>{if(ts-lastT<INTERVAL){raf=requestAnimationFrame(loop);return;}lastT=ts;ctx.clearRect(0,0,W,H);bg('#000');SCENES.forEach((sc,i)=>{if(frame<sc.s||frame>=sc.e)return;FNS[i]((frame-sc.s)/(sc.e-sc.s));});particles=particles.filter(p=>{p.x+=p.vx;p.y+=p.vy;p.vy+=p.gravity;p.vx*=.97;p.vy*=.97;p.life-=p.decay;if(p.life>0){ctx.save();ctx.globalAlpha=p.life;ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(p.x,p.y,p.size,0,Math.PI*2);ctx.fill();ctx.restore();}return p.life>0;});frame=(frame+1)%TOTAL;raf=requestAnimationFrame(loop);};
+    const pause=()=>{if(raf){cancelAnimationFrame(raf);raf=null;}};
+    const resume=()=>{if(!raf)raf=requestAnimationFrame(loop);};
+    const onVis=()=>document.hidden?pause():resume();
+    document.addEventListener('visibilitychange',onVis);
+    raf=requestAnimationFrame(loop);
+    return()=>{pause();document.removeEventListener('visibilitychange',onVis);};
+  },[]);
+  return <canvas ref={canvasRef} width={640} height={240} style={{display:'block',width:'100%',height:'240px',objectFit:'cover'}}/>;
+}
 // ── Updated AuthModal — trailer plays behind the form ──────────────────────
 function AuthModal({onClose, onLogin, toast}) {
   const [mode,setMode]   = useState("login");
