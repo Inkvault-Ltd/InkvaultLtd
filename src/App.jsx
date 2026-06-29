@@ -700,7 +700,7 @@ function CommentItem({comment,user,toast,onDelete,onJumpToPage}) {
    ========================================================================== */
 
 function ReaderPage({readerState,setReaderState,toast,setView,onUpdateChapterComments,user}) {
-  const {manga,chapterIdx,openComments,jumpToPage}=readerState;
+  const {manga,chapterIdx,openComments}=readerState;
   const chapter=manga.chapters[chapterIdx];
   const pages = chapter.pages;
   const [progress,setProgress]=useState(0);
@@ -715,6 +715,20 @@ function ReaderPage({readerState,setReaderState,toast,setView,onUpdateChapterCom
   const [showComments,setShowComments]=useState(!!openComments);
   const [pendingQuote,setPendingQuote]=useState(null);
   const [arrivalKey,setArrivalKey]=useState(null);
+  const [pendingJump,setPendingJump]=useState(null);
+
+  useEffect(()=>{
+    if(pendingJump==null)return;
+    const t=setTimeout(()=>{
+      const target=pageRefs.current[pendingJump];
+      if(target){
+        target.scrollIntoView({block:"center",behavior:"smooth"});
+        setArrivalKey(pendingJump+"-"+Date.now());
+        setPendingJump(null);
+      }
+    },350);
+    return()=>clearTimeout(t);
+  },[pendingJump]);
 
   useEffect(()=>{
     const el=containerRef.current; if(!el) return;
@@ -763,21 +777,18 @@ function ReaderPage({readerState,setReaderState,toast,setView,onUpdateChapterCom
     setShowComments(false);
     setPendingJump(pageIndex);
   };
-  // jumpToPage carries a unique suffix so repeated jumps to the same page re-trigger.
-
   useEffect(()=>{
-    if (jumpToPage == null) return;
-    const idx = typeof jumpToPage === "string" ? parseInt(jumpToPage.split("_")[0],10) : jumpToPage;
-    const t = setTimeout(()=>{
-      const target = pageRefs.current[idx];
-      if (target) {
-        target.scrollIntoView({block:"center"});
-        setArrivalKey(idx+"-"+Date.now());
+    if(pendingJump==null)return;
+    const t=setTimeout(()=>{
+      const target=pageRefs.current[pendingJump];
+      if(target){
+        target.scrollIntoView({block:"center",behavior:"smooth"});
+        setArrivalKey(pendingJump+"-"+Date.now());
+        setPendingJump(null);
       }
-    }, 80);
-    return ()=>clearTimeout(t);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[jumpToPage]);
+    },350);
+    return()=>clearTimeout(t);
+  },[pendingJump]);
 
   return (
     <div style={{position:"fixed",inset:0,background:bgColor,display:"flex",flexDirection:"column",zIndex:500}}>
