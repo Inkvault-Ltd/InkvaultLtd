@@ -264,8 +264,8 @@ function SplashArrivalOverlay({ onDone }) {
           width={260}
           height={260}
           style={{
-            filter: "invert(1) brightness(2)",
-            mixBlendMode: "screen",
+            filter: "invert(0) brightness(1.5) contrast(1.2)",
+            mixBlendMode: "multiply",
             display: "block",
           }}
         />
@@ -764,13 +764,13 @@ function ReaderPage({readerState,setReaderState,toast,setView,onUpdateChapterCom
   // card otherwise wouldn't change state at all).
    
 
-   const handleJumpFromComment = (pageIndex) => {
+    const handleJumpFromComment = (pageIndex) => {
     setShowComments(false);
     setTimeout(() => {
       const target = pageRefs.current[pageIndex];
       if (target) {
-        target.scrollIntoView({ block: "center", behavior: "smooth" });
-        setTimeout(() => setArrivalKey(pageIndex + "-" + Date.now()), 400);
+        target.scrollIntoView({ block: "center", behavior: "instant" });
+        setTimeout(() => setArrivalKey(String(pageIndex)), 80);
       }
     }, 320);
   };
@@ -810,7 +810,7 @@ function ReaderPage({readerState,setReaderState,toast,setView,onUpdateChapterCom
           {pages.map((page,i)=>(
             <div key={page.id} ref={el=>pageRefs.current[i]=el} style={{position:"relative"}}>
               <LazyImg src={page.image} alt={`Page ${i+1}`} style={{width:"100%",aspectRatio:"2/3",display:"block"}}/>
-              {arrivalKey && arrivalKey.startsWith(i+"-") && (
+              {arrivalKey === String(i) && (
                 <SplashArrivalOverlay onDone={()=>setArrivalKey(null)} />
               )}
             </div>
