@@ -878,7 +878,363 @@ function ReaderPage({readerState,setReaderState,toast,setView,onUpdateChapterCom
    Auth
    ========================================================================== */
 
-function AuthModal({onClose,onLogin,toast}) {
+// ── CPU-efficient InkVault cinematic trailer ────────────────────────────────
+// Runs at 30fps (not 60), caps particles at 60, pre-renders grain once,
+// pauses when tab is hidden, and cancels RAF instantly on unmount/auth success.
+function AuthTrailer() {
+  const canvasRef = useRef(null);
+  useEffect(() => {
+    const C = canvasRef.current;
+    if (!C) return;
+    const ctx = C.getContext('2d');
+    const W = C.width, H = C.height;
+
+    // Pre-render grain texture once — never regenerated
+    const noiseC = document.createElement('canvas');
+    noiseC.width = W; noiseC.height = H;
+    const nctx = noiseC.getContext('2d');
+    const id = nctx.createImageData(W, H);
+    for (let i = 0; i < id.data.length; i += 4) {
+      const v = Math.floor(Math.random() * 25);
+      id.data[i] = id.data[i+1] = id.data[i+2] = v;
+      id.data[i+3] = Math.random() * 35;
+    }
+    nctx.putImageData(id, 0, 0);
+
+    const INK = '#0A0A0A', PAPER = '#F4F2ED', SEAL = '#C8312A';
+    const PAPER_DIM = '#B9B6AC', PAPER_FAINT = '#6E6C65';
+    const lerp = (a,b,t) => a+(b-a)*t;
+    const clamp = (v,a,b) => Math.max(a,Math.min(b,v));
+    const easeOut = t => 1-Math.pow(1-t,3);
+    const easeOutBack = t => { const c1=1.70158,c3=c1+1; return 1+c3*Math.pow(t-1,3)+c1*Math.pow(t-1,2); };
+    const mapRange = (t,a,b) => clamp((t-a)/(b-a),0,1);
+
+    let particles = [];
+    class Particle {
+      constructor(x,y,opts={}) {
+        this.x=x; this.y=y;
+        this.vx=(Math.random()-.5)*(opts.speed||2);
+        this.vy=(Math.random()-.5)*(opts.speed||2);
+        this.life=1; this.decay=opts.decay||.018;
+        this.size=opts.size||Math.random()*2+.8;
+        this.color=opts.color||PAPER;
+        this.gravity=opts.gravity||0;
+      }
+      update() { this.x+=this.vx; this.y+=this.vy; this.vy+=this.gravity; this.vx*=.97; this.vy*=.97; this.life-=this.decay; }
+      draw() {
+        ctx.save(); ctx.globalAlpha=Math.max(0,this.life); ctx.fillStyle=this.color;
+        ctx.beginPath(); ctx.arc(this.x,this.y,this.size,0,Math.PI*2); ctx.fill(); ctx.restore();
+      }
+    }
+    const spawnP = (x,y,n,opts) => { for(let i=0;i<n&&particles.length<60;i++) particles.push(new Particle(x,y,opts)); };
+
+    const bg   = (c,a=1) => { ctx.save(); ctx.globalAlpha=a; ctx.fillStyle=c; ctx.fillRect(0,0,W,H); ctx.restore(); };
+    const rect = (x,y,w,h,c,a=1) => { ctx.save(); ctx.globalAlpha=a; ctx.fillStyle=c; ctx.fillRect(x,y,w,h); ctx.restore(); };
+    const grain = (a=.03) => { ctx.save(); ctx.globalAlpha=a; ctx.drawImage(noiseC,0,0); ctx.restore(); };
+    const vignette = (s=.7) => {
+      const g = ctx.createRadialGradient(W/2,H/2,H*.15,W/2,H/2,H*.65);
+      g.addColorStop(0,'rgba(0,0,0,0)'); g.addColorStop(1,`rgba(0,0,0,${s})`);
+      ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+    };
+    const sf = (size,weight,family='sans-serif') => { ctx.font=`${weight} ${size}px ${family}`; };
+    const rule = (x,y,mw,t,color=PAPER_FAINT,a=.45) => {
+      const w=easeOut(clamp(t,0,1))*mw; if(w<1) return;
+      ctx.save(); ctx.globalAlpha=a; ctx.strokeStyle=color; ctx.lineWidth=1;
+      ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x+w,y); ctx.stroke(); ctx.restore();
+    };
+    const animText = (text,cx,cy,t,opts={}) => {
+      const{color=PAPER,size=28,weight='700',family='Shippori Mincho,serif'}=opts;
+      sf(size,weight,family); ctx.textBaseline='middle'; ctx.textAlign='center';
+      const tw=ctx.measureText(text).width; let ox=cx-tw/2;
+      for(let i=0;i<text.length;i++){
+        const ch=text[i]; const delay=i*.05;
+        const p=clamp((t-delay)/.3,0,1);
+        ctx.save(); ctx.globalAlpha=p; ctx.fillStyle=color;
+        ctx.translate(ox,cy+(1-easeOut(p))*12);
+        ctx.fillText(ch,ctx.measureText(ch).width/2,0); ctx.restore();
+        ox+=ctx.measureText(ch).width;
+      }
+    };
+
+    // Scene 0 — cold open logo reveal (frames 0–149)
+    const scene0 = lt => {
+      bg('#000');
+      const logoT = mapRange(lt,.4,1);
+      if(logoT>0){
+        ctx.save(); ctx.globalAlpha=easeOut(logoT)*.85; ctx.fillStyle=PAPER;
+        sf(Math.round(lerp(48,38,easeOut(logoT))),'800','Shippori Mincho,serif');
+        ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText('InkVault',W/2,H/2); ctx.restore();
+      }
+      const tagT = mapRange(lt,.65,1);
+      if(tagT>0){
+        ctx.save(); ctx.globalAlpha=easeOut(tagT)*.6; ctx.fillStyle=PAPER_DIM;
+        sf(10,'600'); ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText('WHERE STORIES LIVE IN INK',W/2,H/2+38); ctx.restore();
+      }
+      vignette(.88); grain(.04);
+    };
+
+    // Scene 1 — hero statement (frames 150–509)
+    const scene1 = lt => {
+      bg(INK);
+      animText('Manga without',W/2,H*.42,mapRange(lt,.1,.55)*8,{size:36,weight:'800'});
+      const h2t = mapRange(lt,.22,.62);
+      if(h2t>0){
+        ctx.save(); ctx.globalAlpha=easeOut(clamp(h2t*3,0,1)); ctx.fillStyle=SEAL;
+        sf(36,'800','Shippori Mincho,serif'); ctx.textAlign='center'; ctx.textBaseline='middle';
+        const sc = lerp(1.12,1,easeOutBack(clamp(h2t*2,0,1)));
+        ctx.translate(W/2,H*.64); ctx.scale(sc,sc); ctx.fillText('compromise.',0,0); ctx.restore();
+      }
+      rule(W/2-110,H*.82,220,mapRange(lt,.55,1),PAPER_FAINT,.3);
+      vignette(.55); grain(.03);
+    };
+
+    // Scene 2 — stats (frames 510–809)
+    const scene2 = lt => {
+      bg(INK);
+      const stats=[
+        {label:'Series',    val:12000, x:W*.22},
+        {label:'Chapters',  val:240000,x:W*.5, hi:true},
+        {label:'Readers',   val:98000, x:W*.78},
+      ];
+      stats.forEach((s,i) => {
+        const delay=i*.12;
+        const p=mapRange(lt,.05+delay,.55+delay); if(p<=0) return;
+        const alpha=easeOut(p);
+        const barH=easeOut(mapRange(lt,.1+delay,.65+delay))*H*.3;
+        rect(s.x-1,H*.62-barH,2,barH,s.hi?SEAL:PAPER,alpha*.4);
+        const nv=Math.floor(easeOut(mapRange(lt,.1+delay,.75+delay))*s.val);
+        const ns=nv>=1000?Math.floor(nv/1000)+'K':String(nv);
+        ctx.save(); ctx.globalAlpha=alpha; ctx.fillStyle=s.hi?SEAL:PAPER;
+        sf(28,'800','Shippori Mincho,serif'); ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+        ctx.fillText(ns,s.x,H*.62); ctx.restore();
+        ctx.save(); ctx.globalAlpha=alpha*.65; ctx.fillStyle=PAPER_DIM;
+        sf(10,'600'); ctx.textAlign='center'; ctx.textBaseline='top';
+        ctx.fillText(s.label.toUpperCase(),s.x,H*.64); ctx.restore();
+        if(Math.random()<.2) spawnP(s.x,H*.62-barH,1,{speed:2,decay:.05,size:1.5,color:s.hi?SEAL:PAPER,gravity:-.02});
+      });
+      vignette(.5); grain(.03);
+    };
+
+    // Scene 3 — finale CTA (frames 810–1319)
+    const scene3 = lt => {
+      bg('#000');
+      // Radiating lines — drawn cheap with stroke, no per-pixel ops
+      ctx.save();
+      for(let i=0;i<20;i++){
+        const angle=i/20*Math.PI*2;
+        const p=mapRange(lt,.08,.55);
+        const len=easeOut(p)*H*.7;
+        ctx.strokeStyle=PAPER; ctx.lineWidth=.4;
+        ctx.globalAlpha=easeOut(p)*.05;
+        ctx.beginPath(); ctx.moveTo(W/2,H/2); ctx.lineTo(W/2+Math.cos(angle)*len,H/2+Math.sin(angle)*len); ctx.stroke();
+      }
+      ctx.restore();
+      vignette(.92);
+      const logoT=mapRange(lt,0,.38);
+      if(logoT>0){
+        const sc=lerp(0,1,easeOutBack(logoT));
+        ctx.save(); ctx.translate(W/2,H*.35); ctx.scale(sc,sc); ctx.translate(-W/2,-H*.35);
+        ctx.globalAlpha=easeOut(logoT); ctx.fillStyle=PAPER;
+        sf(42,'800','Shippori Mincho,serif'); ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText('InkVault',W/2,H*.35); ctx.restore();
+      }
+      const tagT=mapRange(lt,.32,.6);
+      if(tagT>0) animText('Your vault is waiting.',W/2,H*.55,tagT*8,{size:18,weight:'800'});
+      const subT=mapRange(lt,.48,.72);
+      if(subT>0){
+        ctx.save(); ctx.globalAlpha=easeOut(subT); ctx.fillStyle=PAPER_DIM;
+        sf(11,'400'); ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText('No ads. No distractions. Just stories.',W/2,H*.66); ctx.restore();
+      }
+      const ctaT=mapRange(lt,.62,.86);
+      if(ctaT>0){
+        ctx.save(); ctx.globalAlpha=easeOut(ctaT);
+        const bW=164,bH=36,bX=W/2-bW-8,bY=H*.76;
+        ctx.fillStyle=PAPER; ctx.fillRect(bX,bY,bW,bH);
+        ctx.fillStyle=INK; sf(10,'700'); ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText('START READING FREE →',bX+bW/2,bY+bH/2);
+        ctx.strokeStyle='rgba(244,242,237,0.28)'; ctx.lineWidth=1;
+        ctx.strokeRect(W/2+8,bY,bW,bH);
+        ctx.fillStyle=PAPER_DIM; ctx.fillText('BROWSE LIBRARY',W/2+8+bW/2,bY+bH/2);
+        ctx.restore();
+        if(Math.random()<.06) spawnP(W/2+(Math.random()-.5)*160,H*.76+Math.random()*36,1,{speed:.4,decay:.007,size:1.2,color:PAPER_FAINT,gravity:-.008});
+      }
+      const fadeT=mapRange(lt,.87,1);
+      bg(`rgba(0,0,0,${fadeT*fadeT})`);
+      grain(.04);
+    };
+
+    const TOTAL=1320;
+    const SCENES=[{s:0,e:150},{s:150,e:510},{s:510,e:810},{s:810,e:1320}];
+    const SCENE_FNS=[scene0,scene1,scene2,scene3];
+    const FPS_INTERVAL=1000/30; // 30fps cap
+    let frame=0, raf=null, lastT=0;
+
+    const loop = ts => {
+      if(ts-lastT<FPS_INTERVAL){ raf=requestAnimationFrame(loop); return; }
+      lastT=ts;
+      ctx.clearRect(0,0,W,H);
+      bg('#000');
+      SCENES.forEach((sc,i)=>{
+        if(frame<sc.s||frame>=sc.e) return;
+        SCENE_FNS[i]((frame-sc.s)/(sc.e-sc.s));
+      });
+      particles=particles.filter(p=>{p.update();p.draw();return p.life>0});
+      frame=(frame+1)%TOTAL;
+      raf=requestAnimationFrame(loop);
+    };
+
+    const pause  = () => { if(raf){ cancelAnimationFrame(raf); raf=null; } };
+    const resume = () => { if(!raf) raf=requestAnimationFrame(loop); };
+    document.addEventListener('visibilitychange', ()=>document.hidden?pause():resume());
+    raf=requestAnimationFrame(loop);
+
+    return () => {
+      pause();
+      document.removeEventListener('visibilitychange', ()=>document.hidden?pause():resume());
+    };
+  }, []);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      width={640}
+      height={240}
+      style={{ display:'block', width:'100%', height:'240px', objectFit:'cover' }}
+    />
+  );
+}
+
+// ── Updated AuthModal — trailer plays behind the form ──────────────────────
+function AuthModal({onClose, onLogin, toast}) {
+  const [mode,setMode]   = useState("login");
+  const [email,setEmail] = useState("");
+  const [username,setUsername] = useState("");
+  const [password,setPassword] = useState("");
+  const [adminCode,setAdminCode] = useState("");
+  const [loading,setLoading] = useState(false);
+  const [error,setError]   = useState("");
+
+  const submit = async () => {
+    if(!email.trim()||!password){ setError("Email and password are required."); return; }
+    if(mode==="register"&&!username.trim()){ setError("Choose a username."); return; }
+    setError(""); setLoading(true);
+    try {
+      if(mode==="login"){
+        const{data,error}=await supabase.auth.signInWithPassword({email:email.trim(),password});
+        if(error) throw error;
+        await onLogin(data.user); onClose();
+      } else {
+        const{data,error}=await supabase.auth.signUp({
+          email:email.trim(),password,options:{data:{username:username.trim()}}
+        });
+        if(error) throw error;
+        if(data.user&&data.user.identities&&data.user.identities.length===0){
+          setError("That email is already registered."); setLoading(false); return;
+        }
+        if(!data.session){
+          toast("Account created — check your email to confirm, then sign in.","success");
+          setMode("login"); return;
+        }
+        if(adminCode.trim()){
+          const{data:redeemed,error:redeemError}=await supabase.rpc("redeem_admin_code",{input_code:adminCode.trim()});
+          if(redeemError||!redeemed) toast("Admin code was invalid or already used.","warn");
+          else toast("Admin access granted.","success");
+        }
+        await onLogin(data.user); onClose();
+      }
+    } catch(err) {
+      let message="Something went wrong. Please try again.";
+      if(err){
+        if(typeof err==="string") message=err;
+        else if(err.message) message=err.message;
+        else if(err.error_description) message=err.error_description;
+      }
+      setError(message);
+    } finally { setLoading(false); }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div style={{
+        background:'var(--ink-soft)',
+        border:'1px solid var(--line-strong)',
+        borderRadius:2,
+        width:'100%',
+        maxWidth:460,
+        maxHeight:'90vh',
+        overflowY:'auto',
+        animation:'fadeUp 0.25s ease',
+      }}>
+        {/* ── Trailer banner ─────────────────────────────────────────── */}
+        <div style={{position:'relative',overflow:'hidden',borderBottom:'1px solid var(--line)'}}>
+          <AuthTrailer />
+          <div style={{
+            position:'absolute',inset:0,
+            background:'linear-gradient(to bottom, transparent 55%, rgba(21,21,21,0.96) 100%)',
+            pointerEvents:'none',
+          }}/>
+          <div style={{position:'absolute',bottom:12,left:16,pointerEvents:'none'}}>
+            <img src={ASSET_LOGO_NAV} alt="InkVault"
+              style={{height:18,width:'auto',display:'block',filter:'invert(1) brightness(1.4)',opacity:.9}}/>
+          </div>
+        </div>
+
+        {/* ── Auth form ──────────────────────────────────────────────── */}
+        <div style={{padding:'26px 28px 28px'}}>
+          <div className="brush" style={{fontSize:20,fontWeight:800,marginBottom:3}}>
+            {mode==="login"?"Welcome back":"Join InkVault"}
+          </div>
+          <div style={{color:'var(--paper-faint)',fontSize:12.5,marginBottom:20}}>
+            {mode==="login"?"Sign in to your account":"Create your free account"}
+          </div>
+
+          <div style={{display:'flex',flexDirection:'column',gap:10,marginBottom:6}}>
+            <input className="input" type="email" placeholder="Email"
+              value={email} onChange={e=>setEmail(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&submit()}/>
+            {mode==="register"&&(
+              <input className="input" placeholder="Username"
+                value={username} onChange={e=>setUsername(e.target.value)}
+                onKeyDown={e=>e.key==="Enter"&&submit()}/>
+            )}
+            <input className="input" type="password" placeholder="Password"
+              value={password} onChange={e=>setPassword(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&submit()}/>
+            {mode==="register"&&(
+              <input className="input" placeholder="Admin code (optional)"
+                value={adminCode} onChange={e=>setAdminCode(e.target.value)}
+                onKeyDown={e=>e.key==="Enter"&&submit()}/>
+            )}
+          </div>
+
+          {error&&<div style={{color:'var(--seal)',fontSize:12.5,marginTop:8,marginBottom:2}}>{error}</div>}
+
+          <button className="btn btn-primary" onClick={submit} disabled={loading}
+            style={{width:'100%',marginTop:14}}>
+            {loading?"Please wait…":(mode==="login"?"Sign In":"Create Account")}
+          </button>
+
+          <div style={{textAlign:'center',marginTop:14,fontSize:12.5,color:'var(--paper-faint)'}}>
+            {mode==="login"?"No account?":"Already have one?"}
+            <button onClick={()=>{setMode(mode==="login"?"register":"login");setError("");}}
+              style={{color:'var(--paper)',marginLeft:4,cursor:'pointer',fontWeight:700,textDecoration:'underline'}}>
+              {mode==="login"?"Sign up":"Sign in"}
+            </button>
+          </div>
+
+          {mode==="register"&&(
+            <div style={{marginTop:14,padding:'10px 12px',border:'1px solid var(--line)',fontSize:11.5,color:'var(--paper-faint)',lineHeight:1.5}}>
+              Have an admin code from the InkVault team? Enter it above — it's single-use and grants admin access immediately. Leave it blank for a normal reader account.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
   const [mode,setMode]=useState("login");
   const [email,setEmail]=useState("");
   const [username,setUsername]=useState("");
