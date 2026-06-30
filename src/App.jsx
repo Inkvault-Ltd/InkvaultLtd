@@ -866,12 +866,13 @@ function MangaCard({manga,bookmarks,setBookmarks,toast,onClick}) {
    shown inline), replacing the old series-wide Comments tab.
    ========================================================================== */
 
-function DetailPage({manga,setManga,bookmarks,setBookmarks,toast,navigate,user}) {
+function DetailPage({manga,setManga,bookmarks,setBookmarks,toast,navigate,user,friends,sendMessage}) {
   const [tab,setTab]=useState("chapters");
   const [liked,setLiked]=useLocalStorage(`liked-${manga.id}`,false);
   const [disliked,setDisliked]=useLocalStorage(`disliked-${manga.id}`,false);
   const [userRating,setUserRating]=useLocalStorage(`rating-${manga.id}`,0);
   const [readChapters,setReadChapters]=useLocalStorage(`read-${manga.id}`,[]);
+  const [showRecommend,setShowRecommend]=useState(false);
   const isBookmarked=bookmarks.includes(manga.id);
 
   const startReading=(chapterIdx=0, opts={})=>{
@@ -907,12 +908,18 @@ function DetailPage({manga,setManga,bookmarks,setBookmarks,toast,navigate,user})
             <button className="btn btn-primary" onClick={()=>startReading(0)}>Start Reading</button>
             <button className={`btn ${liked?"btn-primary":"btn-ghost"} btn-sm`} onClick={()=>{if(!user){toast("Sign in to like","warn");return;}setLiked(!liked);if(disliked)setDisliked(false);toast(liked?"Like removed":"Liked","success");}}>↑ {liked?"Liked":"Like"}</button>
             <button className={`btn ${disliked?"btn-danger":"btn-ghost"} btn-sm`} onClick={()=>{if(!user){toast("Sign in","warn");return;}setDisliked(!disliked);if(liked)setLiked(false);}}>↓</button>
+            <button className="btn btn-ghost btn-sm" onClick={()=>{if(!user){toast("Sign in to recommend","warn");return;}setShowRecommend(true);}}>
+              ↗ Recommend
+            </button>
             <button className="btn btn-ghost btn-sm" onClick={()=>{setBookmarks(b=>b.includes(manga.id)?b.filter(x=>x!==manga.id):[...b,manga.id]);toast(isBookmarked?"Removed":"Added to library","success");}}>
               {isBookmarked?"✓ Saved":"+ Library"}
             </button>
           </div>
         </div>
       </div>
+      {showRecommend && (
+        <RecommendModal manga={manga} friends={friends||[]} sendMessage={sendMessage} toast={toast} navigate={navigate} onClose={()=>setShowRecommend(false)}/>
+      )}
       <div style={{border:"1px solid var(--line)",padding:"16px 18px",marginBottom:20,fontSize:14,color:"var(--paper-dim)",lineHeight:1.7}}>{manga.description}</div>
       <div style={{display:"flex",gap:2,borderBottom:"1px solid var(--line)",marginBottom:16}}>
         {["chapters","info"].map(t=>(
@@ -956,14 +963,18 @@ function DetailPage({manga,setManga,bookmarks,setBookmarks,toast,navigate,user})
    Chapter comments (per-chapter, with optional quoted page)
    ========================================================================== */
 
-function ChapterComments({chapter, mangaId, onUpdateComments, user, toast, pendingQuote, onConsumeQuote, onJumpToPage}) {
+function ChapterComments({chapter, mangaId, mangaTitle, onUpdateComments, user, toast, friends, pendingQuote, onConsumeQuote, onJumpToPage}) {
   const [text,setText]=useState("");
   const [posting,setPosting]=useState(false);
   const [attachedImage,setAttachedImage]=useState(null); // data URL (upload) or direct https URL (pasted GIF link)
   const [gifUrlInput,setGifUrlInput]=useState("");
   const [showGifInput,setShowGifInput]=useState(false);
+  const [showMentions,setShowMentions]=useState(false);
+  const [mentionQuery,setMentionQuery]=useState("");
   const fileInputRef=useRef(null);
+  const textareaRef=useRef(null);
   const comments = chapter.comments || [];
+  const friendList = friends || [];
 
   const pickImage = async (fileList) => {
     const [url] = await filesToDataUrls(fileList).catch(()=>[]);
@@ -978,16 +989,53 @@ function ChapterComments({chapter, mangaId, onUpdateComments, user, toast, pendi
     setShowGifInput(false);
   };
 
+  const handleTextChange = (e) => {
+    const val = e.target.value;
+    setText(val);
+    const cursor = e.target.selectionStart;
+    const upToCursor = val.slice(0, cursor);
+    const match = upToCursor.match(/@(\w*)$/);
+    if (match && friendList.length) { setMentionQuery(match[1]); setShowMentions(true); }
+    else { setShowMentions(false); }
+  };
+
+  const insertMention = (username) => {
+    const ta = textareaRef.current;
+    const cursor = ta ? ta.selectionStart : text.length;
+    const upToCursor = text.slice(0, cursor);
+    const afterCursor = text.slice(cursor);
+    const newUpTo = upToCursor.replace(/@(\w*)$/, `@${username} `);
+    setText(newUpTo + afterCursor);
+    setShowMentions(false);
+    requestAnimationFrame(()=>ta?.focus());
+  };
+
+  const mentionMatches = showMentions
+    ? friendList.filter(f=>f.username.toLowerCase().startsWith(mentionQuery.toLowerCase())).slice(0,5)
+    : [];
+
   const post = async () => {
     if(!user){toast("Sign in to comment","warn");return;}
     if(!text.trim() && !pendingQuote && !attachedImage)return;
     setPosting(true);
+    const finalText = text.trim();
     await onUpdateComments(mangaId, chapter.id, null, {
       type: "insert",
-      text: text.trim(),
+      text: finalText,
       quotePageId: pendingQuote?.pageId || null,
       imageUrl: attachedImage,
     });
+    // Tag friends mentioned with @username — sends them a notification.
+    const mentionedNames = Array.from(finalText.matchAll(/@(\w+)/g)).map(m=>m[1]);
+    const mentionedFriends = friendList.filter(f=>mentionedNames.includes(f.username));
+    for (const f of mentionedFriends) {
+      try {
+        await supabase.from("notifications").insert({
+          user_id: f.id, actor_id: user.id, type: "mention",
+          data: { username: user.username, mangaId, mangaTitle, chapterNumber: chapter.number },
+        });
+      } catch {}
+    }
     setPosting(false);
     setText("");
     setAttachedImage(null);
@@ -1008,7 +1056,20 @@ function ChapterComments({chapter, mangaId, onUpdateComments, user, toast, pendi
       )}
       {user ? (
         <div style={{marginBottom:20}}>
-          <textarea className="input" rows={3} placeholder={pendingQuote ? "Add a comment about this page…" : "Share your thoughts on this chapter…"} value={text} onChange={e=>setText(e.target.value)} style={{resize:"vertical",marginBottom:8}}/>
+          <div style={{position:"relative"}}>
+            <textarea ref={textareaRef} className="input" rows={3} placeholder={pendingQuote ? "Add a comment about this page… (type @ to tag a friend)" : "Share your thoughts on this chapter… (type @ to tag a friend)"} value={text} onChange={handleTextChange} style={{resize:"vertical",marginBottom:8}}/>
+            {showMentions && mentionMatches.length>0 && (
+              <div style={{position:"absolute",top:"100%",left:0,zIndex:20,width:200,background:"var(--ink-soft)",border:"1px solid var(--line-strong)",borderRadius:"var(--radius)",boxShadow:"var(--shadow-2)",marginTop:-4}}>
+                {mentionMatches.map(f=>(
+                  <div key={f.id} onClick={()=>insertMention(f.username)} style={{padding:"8px 10px",fontSize:12.5,cursor:"pointer",display:"flex",alignItems:"center",gap:8}}
+                    onMouseDown={e=>e.preventDefault()}>
+                    <div className="avatar" style={{width:20,height:20,fontSize:9}}>{f.username.slice(0,2).toUpperCase()}</div>
+                    {f.username}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           {attachedImage && (
             <div style={{position:"relative",display:"inline-block",marginBottom:8}}>
               <img src={attachedImage} alt="Attachment preview" style={{maxWidth:160,maxHeight:160,display:"block",border:"1px solid var(--line-strong)"}}/>
@@ -1086,11 +1147,440 @@ function CommentItem({comment,user,toast,onDelete,onJumpToPage}) {
 }
 
 /* ============================================================================
+   Social — friends (request/accept), DMs (realtime), notifications (realtime),
+   @mention autocomplete in comments (in ChapterComments above), and a
+   per-series "Recommend" sharing flow.
+
+   Requires three new Supabase tables — see the SQL block shared alongside
+   this file. In short: `friendships`, `messages`, `notifications`, all with
+   row-level security scoped to the people involved, plus
+   `alter publication supabase_realtime add table messages, notifications;`
+   so DMs and notifications can stream in live without polling.
+   ========================================================================== */
+
+function useSocial(user, toast) {
+  const [friends, setFriends] = useState([]);       // [{friendshipId, id, username}]
+  const [incoming, setIncoming] = useState([]);      // requests sent TO me
+  const [outgoing, setOutgoing] = useState([]);      // requests I sent
+  const [notifications, setNotifications] = useState([]);
+  const [conversations, setConversations] = useState([]); // [{userId, username, lastMessage, unread}]
+
+  const refetchFriends = useCallback(async () => {
+    if (!user) { setFriends([]); setIncoming([]); setOutgoing([]); return; }
+    const { data, error } = await supabase
+      .from("friendships")
+      .select("id, requester_id, addressee_id, status")
+      .or(`requester_id.eq.${user.id},addressee_id.eq.${user.id}`);
+    if (error) { console.error(error); return; }
+    const otherIds = Array.from(new Set((data || []).map(f => f.requester_id === user.id ? f.addressee_id : f.requester_id)));
+    let usernameById = new Map();
+    if (otherIds.length) {
+      const { data: profs } = await supabase.from("profiles").select("id, username").in("id", otherIds);
+      usernameById = new Map((profs || []).map(p => [p.id, p.username]));
+    }
+    const fr = [], inc = [], out = [];
+    (data || []).forEach(f => {
+      const otherId = f.requester_id === user.id ? f.addressee_id : f.requester_id;
+      const entry = { friendshipId: f.id, id: otherId, username: usernameById.get(otherId) || "unknown" };
+      if (f.status === "accepted") fr.push(entry);
+      else if (f.status === "pending" && f.addressee_id === user.id) inc.push(entry);
+      else if (f.status === "pending" && f.requester_id === user.id) out.push(entry);
+    });
+    setFriends(fr); setIncoming(inc); setOutgoing(out);
+  }, [user]);
+
+  const refetchNotifications = useCallback(async () => {
+    if (!user) { setNotifications([]); return; }
+    const { data, error } = await supabase.from("notifications").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).limit(50);
+    if (error) { console.error(error); return; }
+    setNotifications(data || []);
+  }, [user]);
+
+  const refetchConversations = useCallback(async () => {
+    if (!user) { setConversations([]); return; }
+    const { data, error } = await supabase.from("messages").select("*").or(`sender_id.eq.${user.id},recipient_id.eq.${user.id}`).order("created_at", { ascending: false });
+    if (error) { console.error(error); return; }
+    const otherIds = Array.from(new Set((data || []).map(m => m.sender_id === user.id ? m.recipient_id : m.sender_id)));
+    let usernameById = new Map();
+    if (otherIds.length) {
+      const { data: profs } = await supabase.from("profiles").select("id, username").in("id", otherIds);
+      usernameById = new Map((profs || []).map(p => [p.id, p.username]));
+    }
+    const byUser = new Map();
+    (data || []).forEach(m => {
+      const otherId = m.sender_id === user.id ? m.recipient_id : m.sender_id;
+      if (!byUser.has(otherId)) byUser.set(otherId, { userId: otherId, username: usernameById.get(otherId) || "unknown", lastMessage: m, unread: 0 });
+      if (m.recipient_id === user.id && !m.read) byUser.get(otherId).unread += 1;
+    });
+    setConversations(Array.from(byUser.values()).sort((a, b) => new Date(b.lastMessage.created_at) - new Date(a.lastMessage.created_at)));
+  }, [user]);
+
+  useEffect(() => { refetchFriends(); refetchNotifications(); refetchConversations(); }, [refetchFriends, refetchNotifications, refetchConversations]);
+
+  // Realtime: new notifications, new DMs, and incoming friend requests all
+  // stream straight into state instead of waiting for a manual refresh.
+  useEffect(() => {
+    if (!user) return;
+    const channel = supabase.channel(`social-${user.id}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${user.id}` }, payload => {
+        setNotifications(prev => [payload.new, ...prev]);
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `recipient_id=eq.${user.id}` }, () => {
+        refetchConversations();
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "friendships", filter: `addressee_id=eq.${user.id}` }, () => {
+        refetchFriends();
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [user, refetchConversations, refetchFriends]);
+
+  const searchUsers = useCallback(async (query) => {
+    if (!user || !query.trim()) return [];
+    const { data, error } = await supabase.from("profiles").select("id, username").ilike("username", `%${query.trim()}%`).neq("id", user.id).limit(10);
+    if (error) { console.error(error); return []; }
+    return data || [];
+  }, [user]);
+
+  const sendFriendRequest = useCallback(async (targetId) => {
+    if (!user) return;
+    const { error } = await supabase.from("friendships").insert({ requester_id: user.id, addressee_id: targetId, status: "pending" });
+    if (error) { toast(error.code === "23505" ? "Request already sent" : "Could not send request", "error"); return; }
+    await supabase.from("notifications").insert({ user_id: targetId, actor_id: user.id, type: "friend_request", data: { username: user.username } });
+    toast("Friend request sent", "success");
+    refetchFriends();
+  }, [user, toast, refetchFriends]);
+
+  const respondToRequest = useCallback(async (friendshipId, accept) => {
+    if (!user) return;
+    if (accept) {
+      const { error } = await supabase.from("friendships").update({ status: "accepted" }).eq("id", friendshipId);
+      if (error) { toast("Could not accept request", "error"); return; }
+      const req = incoming.find(r => r.friendshipId === friendshipId);
+      if (req) await supabase.from("notifications").insert({ user_id: req.id, actor_id: user.id, type: "friend_accept", data: { username: user.username } });
+      toast("Friend added", "success");
+    } else {
+      await supabase.from("friendships").delete().eq("id", friendshipId);
+      toast("Request declined", "default");
+    }
+    refetchFriends();
+  }, [user, incoming, toast, refetchFriends]);
+
+  const removeFriend = useCallback(async (friendshipId) => {
+    await supabase.from("friendships").delete().eq("id", friendshipId);
+    toast("Friend removed", "default");
+    refetchFriends();
+  }, [toast, refetchFriends]);
+
+  // share: optional { id, title } of a series being recommended
+  const sendMessage = useCallback(async (recipientId, text, share) => {
+    if (!user) return false;
+    const { error } = await supabase.from("messages").insert({
+      sender_id: user.id, recipient_id: recipientId, text: text || null,
+      share_series_id: share?.id || null, share_series_title: share?.title || null,
+    });
+    if (error) { toast("Could not send message", "error"); return false; }
+    await supabase.from("notifications").insert({ user_id: recipientId, actor_id: user.id, type: share ? "recommend" : "message", data: { username: user.username, seriesTitle: share?.title || null } });
+    refetchConversations();
+    return true;
+  }, [user, toast, refetchConversations]);
+
+  const markNotificationsRead = useCallback(() => {
+    setNotifications(prev => {
+      const unreadIds = prev.filter(n => !n.read).map(n => n.id);
+      if (unreadIds.length) supabase.from("notifications").update({ read: true }).in("id", unreadIds).then();
+      return prev.map(n => ({ ...n, read: true }));
+    });
+  }, []);
+
+  const unreadCount = notifications.filter(n => !n.read).length;
+
+  return { friends, incoming, outgoing, notifications, unreadCount, conversations,
+    searchUsers, sendFriendRequest, respondToRequest, removeFriend, sendMessage,
+    markNotificationsRead, refetchConversations };
+}
+
+function notificationText(n) {
+  const who = n.data?.username || "Someone";
+  switch (n.type) {
+    case "friend_request": return `${who} sent you a friend request`;
+    case "friend_accept": return `${who} accepted your friend request`;
+    case "mention": return `${who} tagged you in a comment on "${n.data?.mangaTitle || "a series"}"${n.data?.chapterNumber ? `, Ch. ${n.data.chapterNumber}` : ""}`;
+    case "recommend": return `${who} recommended "${n.data?.seriesTitle || "a series"}" to you`;
+    case "message": return `${who} sent you a message`;
+    default: return "New notification";
+  }
+}
+
+function NotificationBell({ notifications, unreadCount, onOpen, onNotificationClick }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ position: "relative" }}>
+      <button className="btn btn-ghost btn-sm" style={{ position: "relative", padding: "6px 10px" }}
+        onClick={() => { const next = !open; setOpen(next); if (next) onOpen(); }}>
+        🔔
+        {unreadCount > 0 && (
+          <span style={{ position: "absolute", top: -2, right: -2, background: "var(--seal)", color: "#fff", fontSize: 9, fontWeight: 700, borderRadius: 99, minWidth: 15, height: 15, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 3px" }}>
+            {unreadCount > 9 ? "9+" : unreadCount}
+          </span>
+        )}
+      </button>
+      {open && (
+        <>
+          <div style={{ position: "fixed", inset: 0, zIndex: 200 }} onClick={() => setOpen(false)} />
+          <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, width: 300, maxHeight: 380, overflowY: "auto", background: "var(--ink-soft)", border: "1px solid var(--line-strong)", borderRadius: "var(--radius-lg)", boxShadow: "var(--shadow-3)", zIndex: 201 }}>
+            {notifications.length === 0 ? (
+              <div style={{ padding: 20, textAlign: "center", fontSize: 12, color: "var(--paper-faint)" }}>No notifications yet</div>
+            ) : notifications.map(n => (
+              <div key={n.id} onClick={() => { onNotificationClick(n); setOpen(false); }}
+                style={{ padding: "10px 14px", borderBottom: "1px solid var(--line)", cursor: "pointer", fontSize: 12.5, background: n.read ? "transparent" : "var(--wash)" }}>
+                <div style={{ color: "var(--paper)" }}>{notificationText(n)}</div>
+                <div style={{ fontSize: 10, color: "var(--paper-faint)", marginTop: 3 }}>{new Date(n.created_at).toLocaleString()}</div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function FriendsModal({ onClose, friends, incoming, outgoing, searchUsers, sendFriendRequest, respondToRequest, removeFriend, navigate }) {
+  const [tab, setTab] = useState("friends");
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+
+  useEffect(() => {
+    if (!query.trim()) { setResults([]); return; }
+    setSearching(true);
+    const t = setTimeout(async () => {
+      const r = await searchUsers(query);
+      setResults(r);
+      setSearching(false);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [query, searchUsers]);
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ maxWidth: 440 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <h2 className="brush" style={{ fontSize: 20, fontWeight: 800 }}>Friends</h2>
+          <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
+        </div>
+        <div style={{ display: "flex", gap: 2, borderBottom: "1px solid var(--line)", marginBottom: 14 }}>
+          {["friends", "requests", "find"].map(t => (
+            <button key={t} onClick={() => setTab(t)} style={{ padding: "8px 12px", fontSize: 11, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", color: tab === t ? "var(--paper)" : "var(--paper-faint)", borderBottom: tab === t ? "2px solid var(--paper)" : "2px solid transparent", cursor: "pointer" }}>
+              {t === "requests" && incoming.length > 0 ? `Requests (${incoming.length})` : t}
+            </button>
+          ))}
+        </div>
+
+        {tab === "friends" && (
+          friends.length === 0 ? <div style={{ textAlign: "center", padding: "24px 0", color: "var(--paper-faint)", fontSize: 13 }}>No friends yet — try "Find" to add some.</div> :
+          friends.map(f => (
+            <div key={f.friendshipId} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid var(--line)" }}>
+              <div className="avatar" style={{ width: 30, height: 30, fontSize: 11 }}>{f.username.slice(0, 2).toUpperCase()}</div>
+              <div style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>{f.username}</div>
+              <button className="btn btn-ghost btn-sm" onClick={() => { onClose(); navigate(`/messages/${f.id}`); }}>Message</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => removeFriend(f.friendshipId)}>Remove</button>
+            </div>
+          ))
+        )}
+
+        {tab === "requests" && (
+          <>
+            {incoming.length === 0 && outgoing.length === 0 && <div style={{ textAlign: "center", padding: "24px 0", color: "var(--paper-faint)", fontSize: 13 }}>No pending requests.</div>}
+            {incoming.map(r => (
+              <div key={r.friendshipId} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid var(--line)" }}>
+                <div className="avatar" style={{ width: 30, height: 30, fontSize: 11 }}>{r.username.slice(0, 2).toUpperCase()}</div>
+                <div style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>{r.username}</div>
+                <button className="btn btn-primary btn-sm" onClick={() => respondToRequest(r.friendshipId, true)}>Accept</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => respondToRequest(r.friendshipId, false)}>Decline</button>
+              </div>
+            ))}
+            {outgoing.map(r => (
+              <div key={r.friendshipId} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid var(--line)" }}>
+                <div className="avatar" style={{ width: 30, height: 30, fontSize: 11 }}>{r.username.slice(0, 2).toUpperCase()}</div>
+                <div style={{ flex: 1, fontSize: 13, fontWeight: 600, color: "var(--paper-faint)" }}>{r.username}</div>
+                <span style={{ fontSize: 11, color: "var(--paper-faint)" }}>Pending…</span>
+              </div>
+            ))}
+          </>
+        )}
+
+        {tab === "find" && (
+          <>
+            <input className="input" placeholder="Search by username…" value={query} onChange={e => setQuery(e.target.value)} style={{ marginBottom: 10 }} />
+            {searching && <div style={{ fontSize: 12, color: "var(--paper-faint)" }}>Searching…</div>}
+            {results.map(u => {
+              const already = friends.some(f => f.id === u.id) || outgoing.some(f => f.id === u.id) || incoming.some(f => f.id === u.id);
+              return (
+                <div key={u.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid var(--line)" }}>
+                  <div className="avatar" style={{ width: 30, height: 30, fontSize: 11 }}>{u.username.slice(0, 2).toUpperCase()}</div>
+                  <div style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>{u.username}</div>
+                  <button className="btn btn-ghost btn-sm" disabled={already} onClick={() => sendFriendRequest(u.id)}>{already ? "Pending" : "Add"}</button>
+                </div>
+              );
+            })}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RecommendModal({ manga, friends, sendMessage, onClose, toast, navigate }) {
+  const [message, setMessage] = useState("");
+  const [sentTo, setSentTo] = useState([]);
+
+  const send = async (friend) => {
+    const ok = await sendMessage(friend.id, message.trim() || null, { id: manga.id, title: manga.title });
+    if (ok) { setSentTo(s => [...s, friend.id]); toast(`Sent to ${friend.username}`, "success"); }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ maxWidth: 420 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <h2 className="brush" style={{ fontSize: 18, fontWeight: 800 }}>Recommend "{manga.title}"</h2>
+          <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
+        </div>
+        <textarea className="input" rows={2} placeholder="Add an optional message…" value={message} onChange={e => setMessage(e.target.value)} style={{ resize: "vertical", marginBottom: 14 }} />
+        {friends.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "20px 0", color: "var(--paper-faint)", fontSize: 13 }}>
+            You don't have any friends yet.
+            <div style={{ marginTop: 8 }}><button className="btn btn-ghost btn-sm" onClick={() => { onClose(); navigate("/profile"); }}>Add friends</button></div>
+          </div>
+        ) : friends.map(f => (
+          <div key={f.friendshipId} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid var(--line)" }}>
+            <div className="avatar" style={{ width: 30, height: 30, fontSize: 11 }}>{f.username.slice(0, 2).toUpperCase()}</div>
+            <div style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>{f.username}</div>
+            <button className="btn btn-primary btn-sm" disabled={sentTo.includes(f.id)} onClick={() => send(f)}>{sentTo.includes(f.id) ? "Sent ✓" : "Send"}</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MessagesPage({ library, conversations, friends, user, toast, navigate, refetchConversations }) {
+  const { userId } = useParams();
+  const activeId = userId || conversations[0]?.userId;
+  const activeFriend = friends.find(f => f.id === activeId) || conversations.find(c => c.userId === activeId);
+  const listedFriends = friends.filter(f => !conversations.some(c => c.userId === f.id));
+
+  return (
+    <div style={{ maxWidth: 900, margin: "0 auto", padding: "20px" }}>
+      <div style={{ display: "flex", minHeight: "60vh", border: "1px solid var(--line)" }}>
+        <div style={{ width: 220, flexShrink: 0, borderRight: "1px solid var(--line)", overflowY: "auto" }}>
+          {conversations.length === 0 && listedFriends.length === 0 && <div style={{ padding: 16, fontSize: 12, color: "var(--paper-faint)" }}>No conversations yet. Add friends to start messaging.</div>}
+          {listedFriends.map(f => (
+            <div key={f.id} onClick={() => navigate(`/messages/${f.id}`)} style={{ padding: "12px 14px", cursor: "pointer", borderBottom: "1px solid var(--line)", background: activeId === f.id ? "var(--wash)" : "transparent" }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{f.username}</div>
+              <div style={{ fontSize: 11, color: "var(--paper-faint)" }}>Start a conversation</div>
+            </div>
+          ))}
+          {conversations.map(c => (
+            <div key={c.userId} onClick={() => navigate(`/messages/${c.userId}`)} style={{ padding: "12px 14px", cursor: "pointer", borderBottom: "1px solid var(--line)", background: activeId === c.userId ? "var(--wash)" : "transparent" }}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>{c.username}</span>
+                {c.unread > 0 && <span style={{ background: "var(--seal)", color: "#fff", fontSize: 9, fontWeight: 700, borderRadius: 99, minWidth: 15, height: 15, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 3px" }}>{c.unread}</span>}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--paper-faint)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.lastMessage.share_series_title ? `Shared: ${c.lastMessage.share_series_title}` : (c.lastMessage.text || "")}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+          {activeId ? (
+            <ConversationThread library={library} otherId={activeId} otherUsername={activeFriend?.username || "User"} user={user} toast={toast} navigate={navigate} refetchConversations={refetchConversations} />
+          ) : (
+            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--paper-faint)", fontSize: 13 }}>Select a conversation</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ConversationThread({ library, otherId, otherUsername, user, toast, navigate, refetchConversations }) {
+  const [messages, setMessages] = useState([]);
+  const [text, setText] = useState("");
+  const bottomRef = useRef(null);
+
+  const fetchThread = useCallback(async () => {
+    const { data, error } = await supabase.from("messages").select("*")
+      .or(`and(sender_id.eq.${user.id},recipient_id.eq.${otherId}),and(sender_id.eq.${otherId},recipient_id.eq.${user.id})`)
+      .order("created_at", { ascending: true });
+    if (error) { console.error(error); return; }
+    setMessages(data || []);
+    const unreadIds = (data || []).filter(m => m.recipient_id === user.id && !m.read).map(m => m.id);
+    if (unreadIds.length) { await supabase.from("messages").update({ read: true }).in("id", unreadIds); refetchConversations(); }
+  }, [user, otherId, refetchConversations]);
+
+  useEffect(() => { fetchThread(); }, [fetchThread]);
+
+  useEffect(() => {
+    const channel = supabase.channel(`thread-${user.id}-${otherId}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, payload => {
+        const m = payload.new;
+        if ((m.sender_id === otherId && m.recipient_id === user.id) || (m.sender_id === user.id && m.recipient_id === otherId)) {
+          setMessages(prev => [...prev, m]);
+          if (m.recipient_id === user.id) { supabase.from("messages").update({ read: true }).eq("id", m.id).then(); refetchConversations(); }
+        }
+      }).subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [user, otherId, refetchConversations]);
+
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+
+  const send = async () => {
+    if (!text.trim()) return;
+    const t = text.trim();
+    setText("");
+    const { error } = await supabase.from("messages").insert({ sender_id: user.id, recipient_id: otherId, text: t });
+    if (error) { toast("Could not send message", "error"); return; }
+    await supabase.from("notifications").insert({ user_id: otherId, actor_id: user.id, type: "message", data: { username: user.username } });
+  };
+
+  return (
+    <>
+      <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--line)", fontWeight: 700, fontSize: 14 }}>{otherUsername}</div>
+      <div style={{ flex: 1, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+        {messages.map(m => {
+          const sharedManga = m.share_series_id ? library.find(s => s.id === m.share_series_id) : null;
+          return (
+            <div key={m.id} style={{ alignSelf: m.sender_id === user.id ? "flex-end" : "flex-start", maxWidth: "75%" }}>
+              {m.share_series_title && (
+                <div className="ink-ripple" style={{ padding: "8px 12px", border: "1px solid var(--line-strong)", marginBottom: 4, fontSize: 12, cursor: sharedManga ? "pointer" : "default", background: "var(--wash)" }}
+                  onClick={() => sharedManga ? navigate(seriesPath(sharedManga)) : toast("That series is no longer available", "warn")}>
+                  📖 Recommended: <strong>{m.share_series_title}</strong>
+                </div>
+              )}
+              {m.text && (
+                <div style={{ padding: "8px 12px", borderRadius: "var(--radius)", fontSize: 13, background: m.sender_id === user.id ? "var(--ink-raised)" : "var(--wash)", border: "1px solid var(--line)" }}>{m.text}</div>
+              )}
+              <div style={{ fontSize: 10, color: "var(--paper-faint)", marginTop: 3, textAlign: m.sender_id === user.id ? "right" : "left" }}>{new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
+            </div>
+          );
+        })}
+        <div ref={bottomRef} />
+      </div>
+      <div style={{ display: "flex", gap: 8, padding: 14, borderTop: "1px solid var(--line)" }}>
+        <input className="input" placeholder="Message…" value={text} onChange={e => setText(e.target.value)} onKeyDown={e => e.key === "Enter" && send()} style={{ flex: 1 }} />
+        <button className="btn btn-primary btn-sm" onClick={send}>Send</button>
+      </div>
+    </>
+  );
+}
+
+/* ============================================================================
    Reader — page-based, with floating "quote this page" capture and a
    comment drawer that opens in place (no losing your reading position).
    ========================================================================== */
 
-function ReaderPage({manga,chapterIdx,openComments,toast,navigate,onUpdateChapterComments,user}) {
+function ReaderPage({manga,chapterIdx,openComments,toast,navigate,onUpdateChapterComments,user,friends}) {
   const chapter=manga.chapters[chapterIdx];
   const pages = chapter.pages;
   const [progress,setProgress]=useState(0);
@@ -1228,9 +1718,11 @@ function ReaderPage({manga,chapterIdx,openComments,toast,navigate,onUpdateChapte
             <ChapterComments
               chapter={chapter}
               mangaId={manga.id}
+              mangaTitle={manga.title}
               onUpdateComments={onUpdateChapterComments}
               user={user}
               toast={toast}
+              friends={friends}
               pendingQuote={pendingQuote}
               onConsumeQuote={()=>setPendingQuote(null)}
               onJumpToPage={handleJumpFromComment}
@@ -2480,7 +2972,7 @@ function DeleteManhwaModal({manga, onClose, toast, refetchLibrary}) {
   );
 }
 
-function ProfilePage({user,bookmarks,toast,signOut,navigate}) {
+function ProfilePage({user,bookmarks,toast,signOut,navigate,onOpenFriends,incomingCount}) {
   return (
     <div style={{maxWidth:700,margin:"0 auto",padding:"20px"}}>
       <div style={{display:"flex",gap:16,alignItems:"center",marginBottom:20,padding:"20px",border:"1px solid var(--line)",flexWrap:"wrap"}}>
@@ -2490,6 +2982,10 @@ function ProfilePage({user,bookmarks,toast,signOut,navigate}) {
           {user.isAdmin&&<div className="seal-badge" style={{marginTop:5}}>● Admin</div>}
           <div style={{fontSize:13,color:"var(--paper-faint)",marginTop:4}}>{bookmarks.length} saved</div>
         </div>
+        <button className="btn btn-ghost btn-sm" onClick={onOpenFriends} style={{position:"relative"}}>
+          Friends{incomingCount>0&&<span style={{marginLeft:6,background:"var(--seal)",color:"#fff",fontSize:9,fontWeight:700,borderRadius:99,padding:"1px 6px"}}>{incomingCount}</span>}
+        </button>
+        <button className="btn btn-ghost btn-sm" onClick={()=>navigate("/messages")}>Messages</button>
         <button className="btn btn-ghost btn-sm" onClick={()=>{signOut();toast("Signed out","default");}}>Sign out</button>
       </div>
 
@@ -2522,7 +3018,7 @@ function ProfilePage({user,bookmarks,toast,signOut,navigate}) {
 // Route wrapper for /series/:slug — resolves the manga from the library by
 // slug so the page works on a hard refresh / shared link / new tab, not just
 // when arriving via an in-app click.
-function DetailRoute({library, libraryLoading, bookmarks, setBookmarks, toast, navigate, user}) {
+function DetailRoute({library, libraryLoading, bookmarks, setBookmarks, toast, navigate, user, friends, sendMessage}) {
   const { slug } = useParams();
   const manga = useMemo(()=>findBySlug(library, slug), [library, slug]);
 
@@ -2538,12 +3034,12 @@ function DetailRoute({library, libraryLoading, bookmarks, setBookmarks, toast, n
       </div>
     );
   }
-  return <DetailPage manga={manga} setManga={()=>{}} bookmarks={bookmarks} setBookmarks={setBookmarks} toast={toast} navigate={navigate} user={user}/>;
+  return <DetailPage manga={manga} setManga={()=>{}} bookmarks={bookmarks} setBookmarks={setBookmarks} toast={toast} navigate={navigate} user={user} friends={friends} sendMessage={sendMessage}/>;
 }
 
 // Route wrapper for /series/:slug/read/:chapterIdx (1-based in the URL,
 // converted to a 0-based array index for the chapters array).
-function ReaderRoute({library, libraryLoading, toast, navigate, onUpdateChapterComments, user}) {
+function ReaderRoute({library, libraryLoading, toast, navigate, onUpdateChapterComments, user, friends}) {
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const match = location.pathname.match(/^\/series\/([^/]+)\/read\/(\d+)$/);
@@ -2575,7 +3071,7 @@ function ReaderRoute({library, libraryLoading, toast, navigate, onUpdateChapterC
     );
   }
   return <ReaderPage manga={manga} chapterIdx={idx} openComments={searchParams.get("comments")==="1"}
-    toast={toast} navigate={navigate} onUpdateChapterComments={onUpdateChapterComments} user={user}/>;
+    toast={toast} navigate={navigate} onUpdateChapterComments={onUpdateChapterComments} user={user} friends={friends}/>;
 }
 
 const isReaderPath = (pathname) => /^\/series\/[^/]+\/read\/\d+$/.test(pathname);
@@ -2759,6 +3255,19 @@ function AppShell() {
 
   const { enabled: musicEnabled, toggle: toggleMusic, currentTrack: nowPlayingTrack, dismissCard: dismissNowPlaying } = useMusicPlayer(musicLibrary);
 
+  const social = useSocial(user, toast);
+  const [showFriends,setShowFriends]=useState(false);
+
+  const handleNotificationClick = useCallback((n) => {
+    if (n.type === "friend_request" || n.type === "friend_accept") { setShowFriends(true); return; }
+    if (n.type === "message" || n.type === "recommend") { navigate(`/messages/${n.actor_id}`); return; }
+    if (n.type === "mention") {
+      const manga = library.find(m => m.id === n.data?.mangaId);
+      navigate(manga ? seriesPath(manga, `/read/${n.data.chapterNumber}?comments=1`) : "/profile");
+      return;
+    }
+  }, [navigate, library]);
+
   useEffect(()=>{
     const style=document.createElement("style");
     style.textContent=GLOBAL_CSS;
@@ -2817,7 +3326,7 @@ function AppShell() {
   if (isReaderPath(location.pathname)) {
     return <>
       <ReaderRoute library={library} libraryLoading={libraryLoading} toast={toast} navigate={navigate}
-        onUpdateChapterComments={updateChapterComments} user={user}/>
+        onUpdateChapterComments={updateChapterComments} user={user} friends={social.friends}/>
       <NowPlayingCard track={nowPlayingTrack} onClose={dismissNowPlaying}/>
       <ToastContainer toasts={toasts}/>
     </>;
@@ -2835,6 +3344,12 @@ function AppShell() {
         <img src={ASSET_LOGO_NAV} alt="InkVault" onClick={()=>navigate("/")} style={{height:24,width:"auto",display:"block",filter:"invert(1) brightness(1.4)",cursor:"pointer"}}/>
         <div style={{flex:1}}/>
         <MusicToggle enabled={musicEnabled} onToggle={toggleMusic}/>
+        {user&&(
+          <>
+            <button className="btn btn-ghost btn-sm" onClick={()=>navigate("/messages")} title="Messages">✉</button>
+            <NotificationBell notifications={social.notifications} unreadCount={social.unreadCount} onOpen={social.markNotificationsRead} onNotificationClick={handleNotificationClick}/>
+          </>
+        )}
         {user?(
           <div className="avatar" style={{width:32,height:32,fontSize:11,cursor:"pointer",border:user.isAdmin?"1.5px solid var(--seal)":"1px solid var(--line-strong)"}} onClick={()=>navigate("/profile")}>
             {user.username.slice(0,2).toUpperCase()}
@@ -2849,10 +3364,28 @@ function AppShell() {
             <HomePage library={library} libraryLoading={libraryLoading} bookmarks={bookmarks} setBookmarks={setBookmarks} toast={toast} navigate={navigate}/>
           }/>
           <Route path="/series/:slug" element={
-            <DetailRoute library={library} libraryLoading={libraryLoading} bookmarks={bookmarks} setBookmarks={setBookmarks} toast={toast} navigate={navigate} user={user}/>
+            <DetailRoute library={library} libraryLoading={libraryLoading} bookmarks={bookmarks} setBookmarks={setBookmarks} toast={toast} navigate={navigate} user={user} friends={social.friends} sendMessage={social.sendMessage}/>
           }/>
           <Route path="/profile" element={
-            user?<ProfilePage user={user} bookmarks={bookmarks} toast={toast} signOut={signOut} navigate={navigate}/>:(
+            user?<ProfilePage user={user} bookmarks={bookmarks} toast={toast} signOut={signOut} navigate={navigate} onOpenFriends={()=>setShowFriends(true)} incomingCount={social.incoming.length}/>:(
+              <div style={{textAlign:"center",padding:"80px 20px"}}>
+                <div className="brush" style={{fontSize:36,marginBottom:14}}>人</div>
+                <div className="brush" style={{fontSize:20,fontWeight:800,marginBottom:8}}>Not signed in</div>
+                <button className="btn btn-primary" onClick={()=>setShowAuth(true)}>Sign In / Register</button>
+              </div>
+            )
+          }/>
+          <Route path="/messages" element={
+            user?<MessagesPage library={library} conversations={social.conversations} friends={social.friends} user={user} toast={toast} navigate={navigate} refetchConversations={social.refetchConversations}/>:(
+              <div style={{textAlign:"center",padding:"80px 20px"}}>
+                <div className="brush" style={{fontSize:36,marginBottom:14}}>人</div>
+                <div className="brush" style={{fontSize:20,fontWeight:800,marginBottom:8}}>Not signed in</div>
+                <button className="btn btn-primary" onClick={()=>setShowAuth(true)}>Sign In / Register</button>
+              </div>
+            )
+          }/>
+          <Route path="/messages/:userId" element={
+            user?<MessagesPage library={library} conversations={social.conversations} friends={social.friends} user={user} toast={toast} navigate={navigate} refetchConversations={social.refetchConversations}/>:(
               <div style={{textAlign:"center",padding:"80px 20px"}}>
                 <div className="brush" style={{fontSize:36,marginBottom:14}}>人</div>
                 <div className="brush" style={{fontSize:20,fontWeight:800,marginBottom:8}}>Not signed in</div>
@@ -2885,6 +3418,7 @@ function AppShell() {
         {!user&&<button className="bottom-nav-item" onClick={()=>setShowAuth(true)}><span className="bottom-nav-icon">⚿</span>Sign In</button>}
       </div>
       {showAuth&&<AuthModal toast={toast} onClose={()=>setShowAuth(false)} onLogin={async (authUser)=>{await loadProfile(authUser);toast(`Welcome back`, "success");}}/>}
+      {showFriends&&user&&<FriendsModal onClose={()=>setShowFriends(false)} friends={social.friends} incoming={social.incoming} outgoing={social.outgoing} searchUsers={social.searchUsers} sendFriendRequest={social.sendFriendRequest} respondToRequest={social.respondToRequest} removeFriend={social.removeFriend} navigate={navigate}/>}
       <NowPlayingCard track={nowPlayingTrack} onClose={dismissNowPlaying}/>
       <ToastContainer toasts={toasts}/>
     </div>
