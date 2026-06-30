@@ -111,16 +111,40 @@ const GLOBAL_CSS = `
     --shadow-1: 0 1px 2px rgba(0,0,0,0.4);
     --shadow-2: 0 8px 24px rgba(0,0,0,0.45);
     --shadow-3: 0 20px 50px rgba(0,0,0,0.55);
+
+    /* ---- ink-wash gradients: one monochrome material language, reused
+       everywhere instead of flat fills, so the whole app reads like surfaces
+       catching raking light rather than scattered one-off effects. ---- */
+    --grad-canvas:
+      radial-gradient(120% 70% at 10% -10%, rgba(244,242,237,0.06), transparent 55%),
+      radial-gradient(100% 60% at 105% 0%, rgba(244,242,237,0.035), transparent 50%),
+      radial-gradient(90% 60% at 50% 115%, rgba(0,0,0,0.5), transparent 60%),
+      var(--ink);
+    --grad-surface: linear-gradient(155deg, var(--ink-soft) 0%, var(--ink-raised) 55%, var(--ink-deep) 130%);
+    --grad-surface-hover: linear-gradient(155deg, var(--ink-raised) 0%, #232323 50%, var(--ink-soft) 130%);
+    --grad-sheen: linear-gradient(115deg, transparent 38%, rgba(244,242,237,0.16) 50%, transparent 62%);
+    --grad-bloom: radial-gradient(60% 60% at 28% 18%, rgba(244,242,237,0.14), transparent 72%);
+    --grad-paper: linear-gradient(135deg, #FFFFFF 0%, var(--paper) 55%, #DCD8CC 130%);
+    --grad-paper-hover: linear-gradient(135deg, var(--paper) 0%, #EDEAE1 100%);
+    --grad-line: linear-gradient(90deg, transparent, var(--line-bright) 50%, transparent);
+    --grad-ring: conic-gradient(from 210deg, rgba(244,242,237,0.5), rgba(244,242,237,0.04) 30%, rgba(244,242,237,0.4) 65%, rgba(244,242,237,0.04) 85%, rgba(244,242,237,0.5));
+    --grad-glass: linear-gradient(180deg, rgba(20,20,20,0.95), rgba(5,5,5,0.86));
+    --grad-edge: linear-gradient(180deg, rgba(244,242,237,0.07), transparent);
   }
   html { scroll-behavior: smooth; }
   body {
-    background:
-      radial-gradient(ellipse 1200px 700px at 15% -10%, rgba(244,242,237,0.035), transparent 60%),
-      radial-gradient(ellipse 900px 600px at 100% 0%, rgba(200,49,42,0.04), transparent 55%),
-      var(--ink);
+    background: var(--grad-canvas);
     color: var(--paper); font-family: 'Inter', sans-serif; font-size: 15px; line-height: 1.6;
     overflow-x: hidden; -webkit-font-smoothing: antialiased;
   }
+  /* Faint fixed paper grain — the one whole-app texture pass, kept subtle
+     enough to read as "polish" rather than noise. */
+  body::before {
+    content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background-image: radial-gradient(circle, rgba(244,242,237,0.5) 0.5px, transparent 0.5px);
+    background-size: 4px 4px; opacity: 0.4; mix-blend-mode: overlay;
+  }
+  #root, body > div { position: relative; z-index: 1; }
   ::-webkit-scrollbar { width: 4px; height: 4px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 4px; }
@@ -159,23 +183,29 @@ const GLOBAL_CSS = `
   .tag.action:hover { border-color: var(--paper); color: var(--paper); }
   .tag.active { background: var(--paper); border-color: var(--paper); color: var(--ink); }
 
-  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 11px 22px; border-radius: var(--radius); font-size: 12.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; transition: all 0.18s var(--ease); border: 1px solid transparent; position: relative; }
-  .btn-primary { background: var(--paper); color: var(--ink); border-color: var(--paper); box-shadow: var(--shadow-1); }
-  .btn-primary:hover { background: var(--ink); color: var(--paper); border-color: var(--paper); transform: translateY(-1px); box-shadow: var(--shadow-2); }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 11px 22px; border-radius: var(--radius); font-size: 12.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; transition: all 0.18s var(--ease); border: 1px solid transparent; position: relative; overflow: hidden; }
+  .btn-primary { background: var(--grad-paper); color: var(--ink); border-color: var(--paper); box-shadow: var(--shadow-1); }
+  .btn-primary::before { content: ''; position: absolute; inset: 0; background: var(--grad-sheen); transform: translateX(-120%); transition: transform 0.55s var(--ease); pointer-events: none; }
+  .btn-primary:hover::before { transform: translateX(120%); }
+  .btn-primary:hover { background: var(--grad-surface-hover); color: var(--paper); border-color: var(--paper); transform: translateY(-1px); box-shadow: var(--shadow-2); }
   .btn-primary:active { transform: translateY(0); }
   .btn-ghost { background: transparent; color: var(--paper-dim); border: 1px solid var(--line-strong); }
   .btn-ghost:hover { border-color: var(--paper); color: var(--paper); background: var(--wash); }
   .btn-danger { background: transparent; color: var(--seal-bright); border: 1px solid var(--seal-dim); }
   .btn-danger:hover { background: var(--seal-dim); border-color: var(--seal); }
-  .btn-seal { background: var(--seal); color: var(--paper); border-color: var(--seal); box-shadow: 0 6px 18px rgba(200,49,42,0.35); }
-  .btn-seal:hover { background: var(--seal-bright); transform: translateY(-1px); }
+  .btn-seal { background: linear-gradient(135deg, var(--seal-bright), var(--seal) 65%, #8A211C 135%); color: var(--paper); border-color: var(--seal); box-shadow: 0 6px 18px rgba(200,49,42,0.35); }
+  .btn-seal::before { content: ''; position: absolute; inset: 0; background: var(--grad-sheen); transform: translateX(-120%); transition: transform 0.55s var(--ease); pointer-events: none; }
+  .btn-seal:hover::before { transform: translateX(120%); }
+  .btn-seal:hover { background: linear-gradient(135deg, var(--seal-bright), var(--seal) 80%); transform: translateY(-1px); }
   .btn-sm { padding: 7px 15px; font-size: 11px; }
   .btn-icon { padding: 9px; aspect-ratio: 1; }
   .btn:disabled { opacity: 0.35; cursor: not-allowed; transform: none !important; }
 
-  .card { background: linear-gradient(180deg, var(--ink-soft), var(--ink-raised) 140%); border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden; transition: border-color 0.22s var(--ease), transform 0.22s var(--ease), box-shadow 0.22s var(--ease); }
-  .card:hover { border-color: var(--line-strong); transform: translateY(-3px); box-shadow: var(--shadow-2); }
-  .divider { height: 1px; background: linear-gradient(90deg, var(--line), transparent); margin: 18px 0; }
+  .card { background: var(--grad-surface); border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden; position: relative; transition: border-color 0.22s var(--ease), transform 0.22s var(--ease), box-shadow 0.22s var(--ease), background 0.3s var(--ease); }
+  .card::after { content: ''; position: absolute; inset: 0; background: var(--grad-bloom); opacity: 0; transition: opacity 0.3s var(--ease); pointer-events: none; }
+  .card:hover { border-color: var(--line-strong); transform: translateY(-3px); box-shadow: var(--shadow-2); background: var(--grad-surface-hover); }
+  .card:hover::after { opacity: 1; }
+  .divider { height: 1px; background: var(--grad-line); margin: 18px 0; }
 
   .toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; pointer-events: none; max-width: calc(100vw - 32px); }
   .toast { padding: 13px 18px; background: var(--ink-raised); border: 1px solid var(--line-strong); border-left: 3px solid var(--paper); border-radius: var(--radius); font-size: 12.5px; font-weight: 500; box-shadow: var(--shadow-3); animation: fadeUp 0.3s var(--ease); max-width: 280px; letter-spacing: 0.01em; }
