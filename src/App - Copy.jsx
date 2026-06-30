@@ -1,5 +1,42 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createClient } from "@supabase/supabase-js";
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams, useLocation, useSearchParams } from "react-router-dom";
+
+/* ============================================================================
+   Routing helpers
+   - Series pages are addressed by a readable slug (title + a short id
+     suffix for uniqueness/stability), e.g. /series/solo-leveling-3f9a2b1c
+   - Run `npm install react-router-dom` alongside @supabase/supabase-js for
+     this file to build.
+   ========================================================================== */
+
+function slugify(str) {
+  return (str || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "") || "series";
+}
+
+function seriesSlug(manga) {
+  return `${slugify(manga.title)}-${String(manga.id).slice(0, 8)}`;
+}
+
+function seriesPath(manga, suffix = "") {
+  return `/series/${seriesSlug(manga)}${suffix}`;
+}
+
+// Resolve a :slug route param back to a manga object. Tries an exact
+// recomputed-slug match first (handles the common case), then falls back to
+// matching on the id suffix alone (handles titles that changed after a link
+// was shared/bookmarked).
+function findBySlug(library, slug) {
+  if (!slug) return null;
+  const exact = library.find(m => seriesSlug(m) === slug);
+  if (exact) return exact;
+  const idSuffix = slug.slice(slug.lastIndexOf("-") + 1);
+  return library.find(m => String(m.id).slice(0, 8) === idSuffix) || null;
+}
 
 /* ============================================================================
    Supabase setup
@@ -26,6 +63,7 @@ const ASSET_LOGO_LARGE = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAocAAADc
 const ASSET_FAVICON_32 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAACr0lEQVR42u2XO2hUURCGv3/O3l3xgYKVKEi0CAFFRWKhaGFSCJbGxkY7WxtD0MrGThBs1EIEKy18oiI2CoJFijRaBEFsRNFIRIyPbPYeC+eG43VjNrthEXRgmXPvHc7M/DPzn7PQvhhQ4V8Uue4nhCF/VjcDqABIeiApAsu7HUThbHWtVttQQqWtRmpHIrCxXq/3OwKxWwgE1zvdaZR03Z1bNxAostzieibGuAvIgLwbKBT1Xwu8BaLQ7SSZBSNhbdTegNdmDAPI9MjfBf+eL1YAxaahZJcDynNuAzHGfL2/awBkWba5SSmCj29YjAYsyrAUNAFMek+YpDOOwim3zZokqVZR6ZO4KelqlmWbEhKqAlClD5h2h5+BcV83gGOljPcAJ4F9rQSROdNdKkYNmAB2JzYrkO77t3pi1wCeJHbVBJUIxBA4WEK0KQIC+iWNAV9mN5DuSLoMvEwartAzrj9JOm1mI8DzxPmU88aFlNLnm/dAtdobQhiQdDHNxLONLfzeAN98/QrY2uq4rvgNGrPjDvn0HM6KaZgys2FqtR5gFdADbE/21B873cyOOGR7PdJl3htrS7CXA6gD0cxOtDr6TWGQ9NHr9z6pX93MDidZzpVFzPN8zNe1BO6it/J2OGBA0rUS1M1KUJTmKbCuk6NaDrlCYDBxMAmMJc8zDnvD1xH46vo7MJSw4IKoeLbLGw3eAc8k3QB2ANsk3XObYvOftC3uAr0hhAPAC2BlEtyiyjmf6ftmNiJpVNJj7/hf72+VSn8r3d8KJxQwrnFmHJ+Dzayg6xDCoAd6vhXyme98MGA1MOqbXvJvS0qH1C/3BklXQgj7O7wCzkZ+Npn3W+6koyN2YbcXsw9FQGb20IOZr3yhk8zLm1XM7KiZHer0Ov7X/c1aiH1R8xn+yyLID7Agw/Sivc1UAAAAAElFTkSuQmCC";
 const ASSET_FAVICON_64 = "data:image/png;base64,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";
 const ASSET_BLOT_BLACK_SMALL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACgAAAAoCAYAAACM/rhtAAADhUlEQVR42u2YT4gcRRTGf9+r6u7JRI2wIgZDlMTVXIIYEDZiFA8i4kFQETUQBENWPOWS3ARv4jlE8OASPPjnIpKbkJNIDlE8KAbEk5GAuGtigiQkm5n2MK/Wopnszji9ZsB9UMxQVV391fve+151wf/IAmBs2Hgmb5uRPpb0PlB431RYovR+oJZUA3dm4KfHizHGfUVR7Mm8OrWJMlVmACGEFySdl7RkZm816L/lCbIJOA/U3m4A97YVh5PusgZKoAv0vAXg7mlJlAAg6YPkQaFfgc3TAjDRvAX42aXmRCNhBMR/y1YbFAfgkpkd874Lvq45uBSX/fXM1LCKF4Lr4GMO5kyD3hkzOxpjfHSIU7TG2q0kVgK4N8WhmR3xsS2SvvL+ReD2DJhNyqgBxBjnJH0maSHzQpFRWAGY2RsOZBmoEd8jznlfX9IPLknmz7uEhmfNbD+wbZzESsF/G9LvmcZdM7OXh8zfxABA3+Ot19DFP4Dt+QNFUeyW9E02b4mBAzSKJxPAjqSz2SI10DOzt8uynO12u/eEEJ6S9HUay+dlyXGhqqoHEu1m9ibwZ+bxq64AX4xTMtMudko6IemspMXcm5IuNQDVQ1rffy9LOg0rtOfj1x3gp+PW9NAAPBNjfFLS5w1gNwN3s3YF+A34a0XgpR/LsnxoVIrXDlLpI9/98giA+oMqwzkzO1RV1Q7gjm63uzXGuDfGOJeSbZwkqSQdl/SJV4q0sxIIRVHszl7eXwNcH1jM4nCiwpEmzWYvecT7ogMkxvhERvFqAJOHF3yNTpaESajDuHVbA2mzeTObz0pXsvskfZtl6mr03vAY+3INkZ74UABluctPLksjZG8+fh1YNrOjjUPExBazr7RtDWA1cHEVWamHUS/pDLCrTU/awHnlg/+8hJ9CCM8BM5I+zGKtl9F6bfBfv5jZK2Z22OtxbWaHfPNVqxTHGOfM7LWs6APsaXjpap4gRVE8nM3dGUJ40cGtu1Ve7V9K4mtmr3c6ne1mdkDSQgg8kx0uclBdSe9kdb21k3fz7NZBfOex9d4I2lYC0cwOZl6+q22QK4It6WR6kcdkcG+ljYThYMtZSaddEVq/KkkfSu9mdbUH9mqW+a3frYz7HUJd10971gJYCLqcj494nFuXj/vgJ+j5TNtOeQmzabmXSbLzeAjh+YzWqbo0+k/AhBae37j23bBJ7G/cTxHhIziTEAAAAABJRU5ErkJggg==";
+
 const ASSET_SPLASH_FRAMES = [
   "data:image/png;base64,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",
   "data:image/png;base64,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",
@@ -53,22 +91,40 @@ const ASSET_SPLASH_FRAMES = [
    ========================================================================== */
 
 const GLOBAL_CSS = `
-  @import url('https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap');
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  @import url('https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@500;600;700;800&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap');
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
   :root {
-    --ink: #0A0A0A; --ink-soft: #151515; --ink-raised: #1D1D1D;
-    --paper: #F4F2ED; --paper-dim: #B9B6AC; --paper-faint: #6E6C65;
-    --line: rgba(244,242,237,0.14); --line-strong: rgba(244,242,237,0.28);
-    --wash: rgba(244,242,237,0.05);
-    --seal: #C8312A; --seal-dim: rgba(200,49,42,0.18);
+    --ink: #0A0A0A; --ink-soft: #141414; --ink-raised: #1C1C1C; --ink-deep: #050505;
+    --paper: #F4F2ED; --paper-dim: #ACA89C; --paper-faint: #66635A;
+    --line: rgba(244,242,237,0.10); --line-strong: rgba(244,242,237,0.22); --line-bright: rgba(244,242,237,0.4);
+    --wash: rgba(244,242,237,0.045);
+    --seal: #C8312A; --seal-bright: #E64A3F; --seal-dim: rgba(200,49,42,0.16);
     --ok: #F4F2ED; --warn: #D9A04B;
+    --radius: 3px; --radius-lg: 6px;
+    --ease: cubic-bezier(.16,.84,.32,1);
+    --shadow-1: 0 1px 2px rgba(0,0,0,0.4);
+    --shadow-2: 0 8px 24px rgba(0,0,0,0.45);
+    --shadow-3: 0 20px 50px rgba(0,0,0,0.55);
   }
   html { scroll-behavior: smooth; }
-  body { background: var(--ink); color: var(--paper); font-family: 'Inter', sans-serif; font-size: 15px; line-height: 1.6; overflow-x: hidden; }
-  ::-webkit-scrollbar { width: 3px; } ::-webkit-scrollbar-track { background: var(--ink); } ::-webkit-scrollbar-thumb { background: var(--paper-dim); }
+  body {
+    background:
+      radial-gradient(ellipse 1200px 700px at 15% -10%, rgba(244,242,237,0.035), transparent 60%),
+      radial-gradient(ellipse 900px 600px at 100% 0%, rgba(200,49,42,0.04), transparent 55%),
+      var(--ink);
+    color: var(--paper); font-family: 'Inter', sans-serif; font-size: 15px; line-height: 1.6;
+    overflow-x: hidden; -webkit-font-smoothing: antialiased;
+  }
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--paper-dim); }
   button { cursor: pointer; border: none; outline: none; font-family: inherit; background: none; color: inherit; }
-  input, textarea, select { font-family: inherit; } a { color: inherit; text-decoration: none; }
+  input, textarea, select { font-family: inherit; }
+  a { color: inherit; text-decoration: none; }
   .brush { font-family: 'Shippori Mincho', serif; }
+  .mono { font-family: 'JetBrains Mono', monospace; }
+  ::selection { background: var(--paper); color: var(--ink); }
 
   @keyframes fadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
   @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
@@ -77,93 +133,105 @@ const GLOBAL_CSS = `
   @keyframes brushBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
   @keyframes splashOverlayIn { 0% { transform: scale(0.1); opacity: 0; } 20% { opacity: 1; } 60% { transform: scale(1.6); opacity: 0.85; } 100% { transform: scale(2.8); opacity: 0; } }
   @keyframes liquidPop { 0% { transform: scale(0.05) rotate(-8deg); opacity: 0; filter: blur(8px); } 18% { opacity: 1; filter: blur(2px); } 45% { transform: scale(1.1) rotate(3deg); opacity: 1; filter: blur(0px); } 70% { transform: scale(1.4) rotate(-2deg); opacity: 0.7; } 100% { transform: scale(2.2) rotate(1deg); opacity: 0; filter: blur(4px); } }
-  @keyframes popIn { 0% { transform: scale(0.85); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+  @keyframes popIn { 0% { transform: scale(0.9); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+  @keyframes floatY { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+  @keyframes underlineGrow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 
-  .animate-fadeUp { animation: fadeUp 0.4s ease forwards; }
-  .animate-fadeIn { animation: fadeIn 0.25s ease forwards; }
-  .animate-popIn { animation: popIn 0.22s ease forwards; }
+  .animate-fadeUp { animation: fadeUp 0.45s var(--ease) forwards; }
+  .animate-fadeIn { animation: fadeIn 0.28s ease forwards; }
+  .animate-popIn { animation: popIn 0.25s var(--ease) forwards; }
 
-  .skeleton-ink { position: relative; background: var(--ink-soft); border: 1px solid var(--line); overflow: hidden; }
-  .skeleton-ink::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent 20%, rgba(244,242,237,0.06) 50%, transparent 80%); background-size: 200% 100%; animation: shimmerInk 1.6s infinite; }
+  .skeleton-ink { position: relative; background: var(--ink-soft); border: 1px solid var(--line); overflow: hidden; border-radius: var(--radius); }
+  .skeleton-ink::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent 20%, rgba(244,242,237,0.07) 50%, transparent 80%); background-size: 200% 100%; animation: shimmerInk 1.5s infinite; }
 
   .ink-ripple { position: relative; overflow: hidden; }
   .ink-ripple::after { content: ''; position: absolute; border-radius: 50%; background: var(--wash); width: 10px; height: 10px; top: 50%; left: 50%; transform: translate(-50%,-50%) scale(0); transition: transform 0.5s, opacity 0.5s; opacity: 0; }
   .ink-ripple:active::after { transform: translate(-50%,-50%) scale(24); opacity: 1; transition: 0s; }
 
-  .tag { display: inline-flex; align-items: center; gap: 4px; padding: 3px 11px; background: transparent; border: 1px solid var(--line-strong); border-radius: 2px; font-size: 10.5px; font-weight: 600; color: var(--paper-dim); letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; }
-  .tag.action { cursor: pointer; transition: background 0.15s, color 0.15s, border-color 0.15s; }
+  .tag { display: inline-flex; align-items: center; gap: 4px; padding: 4px 11px; background: transparent; border: 1px solid var(--line-strong); border-radius: 99px; font-size: 10.5px; font-weight: 700; color: var(--paper-dim); letter-spacing: 0.09em; text-transform: uppercase; white-space: nowrap; transition: border-color 0.18s, color 0.18s, background 0.18s; }
+  .tag.action { cursor: pointer; }
   .tag.action:hover { border-color: var(--paper); color: var(--paper); }
   .tag.active { background: var(--paper); border-color: var(--paper); color: var(--ink); }
 
-  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 10px 20px; border-radius: 2px; font-size: 12.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; transition: all 0.18s; border: 1px solid transparent; }
-  .btn-primary { background: var(--paper); color: var(--ink); border-color: var(--paper); }
-  .btn-primary:hover { background: var(--ink); color: var(--paper); border-color: var(--paper); }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 11px 22px; border-radius: var(--radius); font-size: 12.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; transition: all 0.18s var(--ease); border: 1px solid transparent; position: relative; }
+  .btn-primary { background: var(--paper); color: var(--ink); border-color: var(--paper); box-shadow: var(--shadow-1); }
+  .btn-primary:hover { background: var(--ink); color: var(--paper); border-color: var(--paper); transform: translateY(-1px); box-shadow: var(--shadow-2); }
+  .btn-primary:active { transform: translateY(0); }
   .btn-ghost { background: transparent; color: var(--paper-dim); border: 1px solid var(--line-strong); }
-  .btn-ghost:hover { border-color: var(--paper); color: var(--paper); }
-  .btn-danger { background: transparent; color: var(--seal); border: 1px solid var(--seal-dim); }
+  .btn-ghost:hover { border-color: var(--paper); color: var(--paper); background: var(--wash); }
+  .btn-danger { background: transparent; color: var(--seal-bright); border: 1px solid var(--seal-dim); }
   .btn-danger:hover { background: var(--seal-dim); border-color: var(--seal); }
-  .btn-seal { background: var(--seal); color: var(--paper); border-color: var(--seal); }
-  .btn-seal:hover { filter: brightness(1.15); }
-  .btn-sm { padding: 6px 14px; font-size: 11px; }
-  .btn-icon { padding: 8px; aspect-ratio: 1; }
-  .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .btn-seal { background: var(--seal); color: var(--paper); border-color: var(--seal); box-shadow: 0 6px 18px rgba(200,49,42,0.35); }
+  .btn-seal:hover { background: var(--seal-bright); transform: translateY(-1px); }
+  .btn-sm { padding: 7px 15px; font-size: 11px; }
+  .btn-icon { padding: 9px; aspect-ratio: 1; }
+  .btn:disabled { opacity: 0.35; cursor: not-allowed; transform: none !important; }
 
-  .card { background: var(--ink-soft); border: 1px solid var(--line); border-radius: 2px; overflow: hidden; transition: border-color 0.2s, transform 0.2s; }
-  .card:hover { border-color: var(--line-strong); transform: translateY(-2px); }
-  .divider { height: 1px; background: var(--line); margin: 16px 0; }
+  .card { background: linear-gradient(180deg, var(--ink-soft), var(--ink-raised) 140%); border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden; transition: border-color 0.22s var(--ease), transform 0.22s var(--ease), box-shadow 0.22s var(--ease); }
+  .card:hover { border-color: var(--line-strong); transform: translateY(-3px); box-shadow: var(--shadow-2); }
+  .divider { height: 1px; background: linear-gradient(90deg, var(--line), transparent); margin: 18px 0; }
 
   .toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; pointer-events: none; max-width: calc(100vw - 32px); }
-  .toast { padding: 12px 18px; background: var(--ink-soft); border: 1px solid var(--line-strong); border-left: 3px solid var(--paper); font-size: 12.5px; font-weight: 500; box-shadow: 0 10px 30px rgba(0,0,0,0.5); animation: fadeUp 0.3s ease; max-width: 280px; letter-spacing: 0.01em; }
-  .toast.success { border-left-color: var(--paper); } .toast.error { border-left-color: var(--seal); } .toast.warn { border-left-color: var(--warn); }
+  .toast { padding: 13px 18px; background: var(--ink-raised); border: 1px solid var(--line-strong); border-left: 3px solid var(--paper); border-radius: var(--radius); font-size: 12.5px; font-weight: 500; box-shadow: var(--shadow-3); animation: fadeUp 0.3s var(--ease); max-width: 280px; letter-spacing: 0.01em; }
+  .toast.success { border-left-color: var(--paper); }
+  .toast.error { border-left-color: var(--seal); }
+  .toast.warn { border-left-color: var(--warn); }
 
-  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.82); backdrop-filter: blur(4px); z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 16px; animation: fadeIn 0.2s ease; }
-  .modal { background: var(--ink-soft); border: 1px solid var(--line-strong); border-radius: 2px; padding: 30px; width: 100%; max-width: 460px; max-height: 90vh; overflow-y: auto; animation: fadeUp 0.25s ease; }
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.86); backdrop-filter: blur(6px); z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 16px; animation: fadeIn 0.22s ease; }
+  .modal { background: var(--ink-soft); border: 1px solid var(--line-strong); border-radius: var(--radius-lg); padding: 32px; width: 100%; max-width: 460px; max-height: 90vh; overflow-y: auto; animation: fadeUp 0.28s var(--ease); box-shadow: var(--shadow-3); }
 
-  .drawer-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(3px); z-index: 1500; animation: fadeIn 0.2s ease; display: flex; justify-content: flex-end; }
-  .drawer { background: var(--ink-soft); border-left: 1px solid var(--line-strong); width: 100%; max-width: 420px; height: 100%; overflow-y: auto; animation: fadeUp 0.25s ease; padding: 22px; }
+  .drawer-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.65); backdrop-filter: blur(4px); z-index: 1500; animation: fadeIn 0.22s ease; display: flex; justify-content: flex-end; }
+  .drawer { background: var(--ink-soft); border-left: 1px solid var(--line-strong); width: 100%; max-width: 420px; height: 100%; overflow-y: auto; animation: fadeUp 0.28s var(--ease); padding: 24px; box-shadow: var(--shadow-3); }
   @media (max-width: 640px) { .drawer { max-width: 100%; } }
 
-  .nav { position: sticky; top: 0; z-index: 100; background: rgba(10,10,10,0.92); backdrop-filter: blur(14px); border-bottom: 1px solid var(--line); padding: 0 20px; height: 58px; display: flex; align-items: center; gap: 12px; }
+  .nav { position: sticky; top: 0; z-index: 100; background: rgba(10,10,10,0.86); backdrop-filter: blur(16px) saturate(140%); border-bottom: 1px solid var(--line); padding: 0 20px; height: 60px; display: flex; align-items: center; gap: 12px; }
 
-  .manga-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 14px; }
-  @media (min-width: 600px) { .manga-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px; } }
-  @media (min-width: 900px) { .manga-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 18px; } }
+  .manga-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 16px; }
+  @media (min-width: 600px) { .manga-grid { grid-template-columns: repeat(auto-fill, minmax(162px, 1fr)); gap: 18px; } }
+  @media (min-width: 900px) { .manga-grid { grid-template-columns: repeat(auto-fill, minmax(182px, 1fr)); gap: 20px; } }
   .manga-cover { aspect-ratio: 2/3; object-fit: cover; width: 100%; display: block; background: var(--ink-soft); }
 
-  .input { width: 100%; background: var(--ink); border: 1px solid var(--line-strong); border-radius: 2px; padding: 11px 14px; color: var(--paper); font-size: 14px; transition: border-color 0.18s; outline: none; }
-  .input:focus { border-color: var(--paper); }
+  .input { width: 100%; background: var(--ink); border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 12px 14px; color: var(--paper); font-size: 14px; transition: border-color 0.18s, box-shadow 0.18s; outline: none; }
+  .input:focus { border-color: var(--paper); box-shadow: 0 0 0 3px var(--wash); }
   .input::placeholder { color: var(--paper-faint); }
-  select.input { cursor: pointer; } select.input option { background: var(--ink-soft); }
+  select.input { cursor: pointer; }
+  select.input option { background: var(--ink-soft); }
 
-  .panel-nav { position: fixed; right: 12px; top: 50%; transform: translateY(-50%); z-index: 200; display: flex; flex-direction: column; gap: 3px; transition: opacity 0.3s; }
-  .panel-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--paper-dim); opacity: 0.4; cursor: pointer; transition: all 0.2s; }
-  .panel-dot.active { background: var(--paper); opacity: 1; width: 3px; height: 18px; border-radius: 1px; }
+  .panel-nav { position: fixed; right: 12px; top: 50%; transform: translateY(-50%); z-index: 200; display: flex; flex-direction: column; gap: 4px; transition: opacity 0.3s; }
+  .panel-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--paper-dim); opacity: 0.4; cursor: pointer; transition: all 0.25s var(--ease); }
+  .panel-dot.active { background: var(--paper); opacity: 1; width: 3px; height: 20px; border-radius: 2px; }
 
-  .comment { display: flex; gap: 10px; padding: 14px 0; border-bottom: 1px solid var(--line); animation: fadeUp 0.3s ease; }
-  .avatar { width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; background: var(--ink-raised); border: 1px solid var(--line-strong); letter-spacing: 0.02em; }
+  .comment { display: flex; gap: 11px; padding: 16px 0; border-bottom: 1px solid var(--line); animation: fadeUp 0.3s var(--ease); }
+  .avatar { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; flex-shrink: 0; background: var(--ink-raised); border: 1px solid var(--line-strong); letter-spacing: 0.02em; }
 
-  .chapter-item { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--line); cursor: pointer; transition: background 0.15s; }
-  .chapter-item:hover { background: var(--wash); } .chapter-item.read { opacity: 0.45; }
+  .chapter-item { display: flex; align-items: center; justify-content: space-between; padding: 13px 14px; border-bottom: 1px solid var(--line); cursor: pointer; transition: background 0.18s, padding-left 0.18s; }
+  .chapter-item:hover { background: var(--wash); padding-left: 18px; }
+  .chapter-item.read { opacity: 0.42; }
 
-  .ctx-menu { position: fixed; background: var(--ink-raised); border: 1px solid var(--line-strong); border-radius: 2px; padding: 6px; min-width: 170px; z-index: 5000; animation: fadeUp 0.15s ease; box-shadow: 0 10px 30px rgba(0,0,0,0.6); }
+  .ctx-menu { position: fixed; background: var(--ink-raised); border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 6px; min-width: 170px; z-index: 5000; animation: fadeUp 0.16s var(--ease); box-shadow: var(--shadow-3); }
   .ctx-item { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border-radius: 2px; font-size: 13px; cursor: pointer; transition: background 0.15s; width: 100%; text-align: left; }
-  .ctx-item:hover { background: var(--wash); } .ctx-item.danger { color: var(--seal); }
+  .ctx-item:hover { background: var(--wash); }
+  .ctx-item.danger { color: var(--seal-bright); }
 
-  .dropzone { border: 1px dashed var(--line-strong); border-radius: 2px; padding: 32px; text-align: center; cursor: pointer; transition: all 0.2s; }
+  .dropzone { border: 1.5px dashed var(--line-strong); border-radius: var(--radius-lg); padding: 34px; text-align: center; cursor: pointer; transition: all 0.2s; }
   .dropzone:hover, .dropzone.dragover { border-color: var(--paper); background: var(--wash); }
 
-  .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; background: rgba(10,10,10,0.95); backdrop-filter: blur(12px); border-top: 1px solid var(--line); display: flex; z-index: 100; padding-bottom: env(safe-area-inset-bottom); }
-  .bottom-nav-item { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 10px 0; color: var(--paper-faint); font-size: 9.5px; font-weight: 600; cursor: pointer; transition: color 0.2s; letter-spacing: 0.04em; text-transform: uppercase; }
+  .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; background: rgba(10,10,10,0.92); backdrop-filter: blur(14px); border-top: 1px solid var(--line); display: flex; z-index: 100; padding-bottom: env(safe-area-inset-bottom); }
+  .bottom-nav-item { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 10px 0; color: var(--paper-faint); font-size: 9.5px; font-weight: 700; cursor: pointer; transition: color 0.2s; letter-spacing: 0.05em; text-transform: uppercase; position: relative; }
   .bottom-nav-item.active { color: var(--paper); }
+  .bottom-nav-item.active::before { content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 18px; height: 2px; background: var(--paper); border-radius: 2px; }
   .bottom-nav-icon { font-size: 18px; line-height: 1; }
   @media (min-width: 768px) { .bottom-nav { display: none; } }
-  @media (max-width: 767px) { .main-content { padding-bottom: 72px !important; } }
+  @media (max-width: 767px) { .main-content { padding-bottom: 76px !important; } }
 
-  .scroll-x { overflow-x: auto; scrollbar-width: none; } .scroll-x::-webkit-scrollbar { display: none; }
-  .stars { display: flex; gap: 2px; } .star { font-size: 14px; cursor: pointer; transition: transform 0.15s; color: var(--paper-dim); } .star:hover { transform: scale(1.25); }
+  .scroll-x { overflow-x: auto; scrollbar-width: none; }
+  .scroll-x::-webkit-scrollbar { display: none; }
+  .stars { display: flex; gap: 2px; }
+  .star { font-size: 14px; cursor: pointer; transition: transform 0.18s var(--ease); color: var(--paper-dim); }
+  .star:hover { transform: scale(1.3); }
   .star.lit { color: var(--paper); }
 
-  .seal-badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; background: var(--seal-dim); border: 1px solid var(--seal); border-radius: 2px; font-size: 9.5px; font-weight: 800; color: var(--seal); letter-spacing: 0.1em; text-transform: uppercase; }
+  .seal-badge { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; background: var(--seal-dim); border: 1px solid var(--seal); border-radius: 99px; font-size: 9.5px; font-weight: 800; color: var(--seal-bright); letter-spacing: 0.1em; text-transform: uppercase; }
 
   .halftone {
     background-image: radial-gradient(circle, rgba(244,242,237,0.5) 0.6px, transparent 0.6px);
@@ -171,31 +239,93 @@ const GLOBAL_CSS = `
   }
 
   .ink-loader-wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; }
-  .ink-loader-label { font-family: 'Shippori Mincho', serif; font-size: 14px; color: var(--paper-dim); letter-spacing: 0.04em; }
+  .ink-loader-label { font-family: 'Shippori Mincho', serif; font-size: 14px; color: var(--paper-dim); letter-spacing: 0.05em; }
   .ink-loader-label .cursor { animation: brushBlink 1s step-end infinite; }
 
   /* ---- quote-card (the comment that points at a page) ---- */
   .quote-card {
-    display: flex; align-items: center; gap: 10px; padding: 8px; margin-top: 8px; margin-bottom: 2px;
-    border: 1px solid var(--line-strong); background: var(--ink); cursor: pointer; transition: border-color 0.18s, transform 0.18s;
+    display: flex; align-items: center; gap: 10px; padding: 9px; margin-top: 9px; margin-bottom: 2px;
+    border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--ink); cursor: pointer; transition: border-color 0.2s var(--ease), transform 0.2s var(--ease), box-shadow 0.2s var(--ease);
     max-width: 280px;
   }
-  .quote-card:hover { border-color: var(--paper); transform: translateY(-1px); }
-  .quote-thumb-wrap { position: relative; width: 46px; height: 64px; flex-shrink: 0; border: 1px solid var(--line-strong); overflow: hidden; background: var(--ink-soft); }
+  .quote-card:hover { border-color: var(--paper); transform: translateY(-2px); box-shadow: var(--shadow-1); }
+  .quote-thumb-wrap { position: relative; width: 46px; height: 64px; flex-shrink: 0; border: 1px solid var(--line-strong); border-radius: 2px; overflow: hidden; background: var(--ink-soft); }
   .quote-pin { position: absolute; bottom: -3px; right: -3px; width: 16px; height: 16px; border-radius: 50%; background: var(--paper); color: var(--ink); display: flex; align-items: center; justify-content: center; font-size: 9px; border: 1.5px solid var(--ink); }
 
   /* ---- floating quote button in reader ---- */
   .quote-fab {
     position: fixed; z-index: 50; right: 16px; bottom: 84px;
-    display: flex; align-items: center; gap: 8px; padding: 10px 16px;
-    background: var(--paper); color: var(--ink); border-radius: 99px; font-size: 12px; font-weight: 700;
-    letter-spacing: 0.03em; text-transform: uppercase; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-    transition: opacity 0.25s, transform 0.25s;
+    display: flex; align-items: center; gap: 8px; padding: 11px 18px;
+    background: var(--paper); color: var(--ink); border-radius: 99px; font-size: 12px; font-weight: 800;
+    letter-spacing: 0.04em; text-transform: uppercase; box-shadow: var(--shadow-3);
+    transition: opacity 0.25s var(--ease), transform 0.25s var(--ease);
+    animation: floatY 3.2s ease-in-out infinite;
   }
+  .quote-fab:hover { transform: scale(1.05); }
   @media (min-width: 768px) { .quote-fab { bottom: 28px; } }
 
   /* ---- ink splash arrival overlay (plays over a jumped-to page) ---- */
   .splash-arrival { position: absolute; inset: 0; pointer-events: none; display: flex; align-items: center; justify-content: center; z-index: 10; overflow: hidden; }
+
+  /* ---- music toggle + now-playing liquid card ---- */
+  @keyframes liquidMorph {
+    0%   { border-radius: 42% 58% 63% 37% / 41% 44% 56% 59%; }
+    25%  { border-radius: 58% 42% 38% 62% / 60% 38% 62% 40%; }
+    50%  { border-radius: 50% 50% 33% 67% / 55% 27% 73% 45%; }
+    75%  { border-radius: 36% 64% 64% 36% / 36% 63% 37% 64%; }
+    100% { border-radius: 42% 58% 63% 37% / 41% 44% 56% 59%; }
+  }
+  @keyframes musicCardIn { 0% { opacity: 0; transform: translateY(10px) scale(0.92); } 100% { opacity: 1; transform: translateY(0) scale(1); } }
+  @keyframes musicCardOut { 0% { opacity: 1; transform: translateY(0) scale(1); } 100% { opacity: 0; transform: translateY(10px) scale(0.92); } }
+  @keyframes liquidPulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.12); } }
+
+  .music-toggle { position: relative; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; border: 1px solid var(--line-strong); background: var(--ink-raised); color: var(--paper-dim); transition: border-color 0.2s, color 0.2s, background 0.2s; flex-shrink: 0; }
+  .music-toggle:hover { border-color: var(--paper); color: var(--paper); }
+  .music-toggle.on { color: var(--paper); border-color: var(--paper); background: var(--wash); }
+  .music-toggle .music-bars { display: flex; align-items: flex-end; gap: 2px; height: 12px; }
+  .music-toggle .music-bars span { width: 2px; background: currentColor; border-radius: 1px; opacity: 0.85; }
+  .music-toggle.on .music-bars span { animation: musicBar 0.9s ease-in-out infinite; }
+  .music-toggle .music-bars span:nth-child(1) { height: 5px; animation-delay: 0s; }
+  .music-toggle .music-bars span:nth-child(2) { height: 11px; animation-delay: 0.15s; }
+  .music-toggle .music-bars span:nth-child(3) { height: 7px; animation-delay: 0.3s; }
+  @keyframes musicBar { 0%,100% { transform: scaleY(0.4); } 50% { transform: scaleY(1); } }
+
+  .music-now-card {
+    position: fixed;
+    --mx: 30%; --my: 30%;
+    left: 16px; bottom: 84px; z-index: 90;
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 16px 10px 10px; max-width: 280px;
+    background:
+      radial-gradient(circle at var(--mx) var(--my), rgba(230,74,63,0.45), transparent 55%),
+      linear-gradient(135deg, rgba(28,28,28,0.94), rgba(10,10,10,0.97));
+    border: 1px solid var(--line-strong); box-shadow: var(--shadow-3);
+    backdrop-filter: blur(14px) saturate(140%);
+    animation: musicCardIn 0.45s var(--ease), liquidMorph 9s ease-in-out infinite;
+    overflow: hidden;
+    will-change: background;
+  }
+  .music-now-card::before {
+    content: ''; position: absolute; inset: 0; pointer-events: none; mix-blend-mode: screen; opacity: 0.55;
+    background: radial-gradient(circle at var(--mx) var(--my), rgba(244,242,237,0.16), transparent 40%);
+    transform: translate3d(0,0,0);
+  }
+  .music-now-card.leaving { animation: musicCardOut 0.4s var(--ease) forwards; }
+  @media (min-width: 768px) { .music-now-card { bottom: 24px; left: 24px; } }
+  .music-now-blob {
+    width: 38px; height: 38px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, var(--seal), var(--seal-bright));
+    color: var(--paper); font-size: 14px;
+    animation: liquidMorph 6s ease-in-out infinite, liquidPulse 2.4s ease-in-out infinite;
+  }
+  .music-now-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .music-now-title { font-size: 12.5px; font-weight: 800; color: var(--paper); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .music-now-producer { font-size: 10.5px; font-weight: 600; color: var(--paper-dim); letter-spacing: 0.03em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .music-now-close { margin-left: auto; flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--paper-faint); cursor: pointer; transition: color 0.18s, background 0.18s; }
+  .music-now-close:hover { color: var(--paper); background: var(--wash); }
+
+  .music-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+  .music-row-blob { width: 30px; height: 30px; flex-shrink: 0; background: linear-gradient(135deg, var(--seal), var(--seal-bright)); animation: liquidMorph 7s ease-in-out infinite; display: flex; align-items: center; justify-content: center; color: var(--paper); font-size: 11px; }
 `;
 
 /* ============================================================================
@@ -408,11 +538,202 @@ async function uploadDataUrlToStorage(dataUrl, pathHint) {
   return data.publicUrl;
 }
 
+/* Uploads a raw audio File to the `inkvault-music` Storage bucket and
+   returns its public URL. Used by the admin Music panel. */
+async function uploadAudioToStorage(file) {
+  const ext = (file.name.split(".").pop() || "mp3").toLowerCase();
+  const path = `track-${Date.now()}-${Math.random().toString(36).slice(2,8)}.${ext}`;
+  const { error } = await supabase.storage.from("inkvault-music").upload(path, file, { contentType: file.type || "audio/mpeg" });
+  if (error) throw error;
+  const { data } = supabase.storage.from("inkvault-music").getPublicUrl(path);
+  return data.publicUrl;
+}
+
 /* ============================================================================
-   Home
+   Music — admin-managed background tracks, user-toggleable playback
    ========================================================================== */
 
-function HomePage({library,libraryLoading,bookmarks,setBookmarks,toast,setView,setCurrentManga}) {
+const MUSIC_PREF_KEY = "inkvault-music-enabled";
+
+function MusicToggle({ enabled, onToggle }) {
+  return (
+    <div className={`music-toggle ${enabled?"on":""}`} title={enabled?"Music on":"Music off"} onClick={onToggle}>
+      <div className="music-bars"><span/><span/><span/></div>
+    </div>
+  );
+}
+
+function NowPlayingCard({ track, onClose }) {
+  const [leaving, setLeaving] = useState(false);
+  const cardRef = useRef(null);
+  const rafRef = useRef(null);
+  const lastEvent = useRef(null);
+
+  // Cursor-reactive "ink" gradient: position is written straight to the
+  // element's style via a CSS custom property, throttled to one update per
+  // animation frame and skipped entirely while the card isn't hovered —
+  // no React re-renders, no layout thrash, negligible CPU cost.
+  const scheduleUpdate = useCallback(() => {
+    if (rafRef.current) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      const el = cardRef.current;
+      const e = lastEvent.current;
+      if (!el || !e) return;
+      const rect = el.getBoundingClientRect();
+      const x = ((e.clientX - rect.left) / rect.width) * 100;
+      const y = ((e.clientY - rect.top) / rect.height) * 100;
+      el.style.setProperty("--mx", `${x.toFixed(1)}%`);
+      el.style.setProperty("--my", `${y.toFixed(1)}%`);
+    });
+  }, []);
+
+  const handleMouseMove = useCallback((e) => {
+    lastEvent.current = e;
+    scheduleUpdate();
+  }, [scheduleUpdate]);
+
+  useEffect(() => () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); }, []);
+
+  if (!track) return null;
+  const close = () => {
+    setLeaving(true);
+    setTimeout(onClose, 380);
+  };
+  return (
+    <div ref={cardRef} className={`music-now-card ${leaving?"leaving":""}`} onMouseMove={handleMouseMove}>
+      <div className="music-now-blob">♪</div>
+      <div className="music-now-info">
+        <div className="music-now-title">{track.title}</div>
+        <div className="music-now-producer">prod. {track.producer}</div>
+      </div>
+      <div className="music-now-close" onClick={close}>✕</div>
+    </div>
+  );
+}
+
+/* Owns the <audio> element, the on/off toggle (persisted to localStorage),
+   and the brief "now playing" liquid card that surfaces whenever a track
+   starts. Renders nothing visible itself besides the card — the toggle
+   button is rendered separately in the nav so it can sit next to the avatar. */
+function useMusicPlayer(musicLibrary) {
+  const [enabled, setEnabled] = useState(() => {
+    try { return localStorage.getItem(MUSIC_PREF_KEY) === "1"; } catch { return false; }
+  });
+  const [trackIdx, setTrackIdx] = useState(0);
+  const [showCard, setShowCard] = useState(false);
+  const audioRef = useRef(null);
+  const cardTimer = useRef(null);
+
+  useEffect(() => {
+    try { localStorage.setItem(MUSIC_PREF_KEY, enabled ? "1" : "0"); } catch {}
+  }, [enabled]);
+
+  useEffect(() => {
+    if (!audioRef.current) audioRef.current = new Audio();
+    const audio = audioRef.current;
+    audio.volume = 0.55;
+    if (!enabled || musicLibrary.length === 0) {
+      audio.pause();
+      return;
+    }
+    const track = musicLibrary[trackIdx % musicLibrary.length];
+    if (!track) return;
+    if (audio.src !== track.url) audio.src = track.url;
+    audio.play().catch(() => {});
+    setShowCard(true);
+    clearTimeout(cardTimer.current);
+    cardTimer.current = setTimeout(() => setShowCard(false), 6000);
+
+    const onEnded = () => setTrackIdx(i => (i + 1) % musicLibrary.length);
+    audio.addEventListener("ended", onEnded);
+    return () => audio.removeEventListener("ended", onEnded);
+  }, [enabled, trackIdx, musicLibrary]);
+
+  const toggle = useCallback(() => {
+    setEnabled(e => {
+      const next = !e;
+      if (!next && audioRef.current) audioRef.current.pause();
+      return next;
+    });
+  }, []);
+
+  const currentTrack = enabled ? musicLibrary[trackIdx % (musicLibrary.length || 1)] : null;
+
+  return { enabled, toggle, currentTrack: showCard ? currentTrack : null, dismissCard: () => setShowCard(false) };
+}
+
+/* Admin sub-panel: upload new tracks (name + producer + audio file) and
+   remove existing ones. Lives alongside "Manage Library" / "Upload New". */
+function AdminMusicManager({ musicLibrary, refetchMusic, toast }) {
+  const [title, setTitle] = useState("");
+  const [producer, setProducer] = useState("");
+  const [file, setFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+
+  const handleUpload = async () => {
+    if (!title.trim() || !producer.trim() || !file) { toast("Add a title, producer, and audio file","warn"); return; }
+    setUploading(true);
+    try {
+      const url = await uploadAudioToStorage(file);
+      const { error } = await supabase.from("music").insert({ title: title.trim(), producer: producer.trim(), url });
+      if (error) throw error;
+      toast("Track added","success");
+      setTitle(""); setProducer(""); setFile(null);
+      refetchMusic();
+    } catch (e) {
+      toast(e.message || "Upload failed","error");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleRemove = async (track) => {
+    try {
+      await supabase.from("music").delete().eq("id", track.id);
+      toast("Track removed","success");
+      refetchMusic();
+    } catch (e) {
+      toast(e.message || "Could not remove track","error");
+    }
+  };
+
+  return (
+    <div>
+      <div className="card" style={{padding:20,marginBottom:24}}>
+        <div className="brush" style={{fontSize:15,fontWeight:800,marginBottom:14}}>Add a track</div>
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          <input className="input" placeholder="Song title" value={title} onChange={e=>setTitle(e.target.value)}/>
+          <input className="input" placeholder="Producer's name" value={producer} onChange={e=>setProducer(e.target.value)}/>
+          <label className="dropzone" style={{padding:18,cursor:"pointer"}}>
+            <input type="file" accept="audio/*" style={{display:"none"}} onChange={e=>setFile(e.target.files?.[0]||null)}/>
+            <div style={{fontSize:12,fontWeight:700,color:"var(--paper-dim)"}}>{file ? file.name : "Click to choose an audio file"}</div>
+          </label>
+          <button className="btn btn-primary" disabled={uploading} onClick={handleUpload} style={{alignSelf:"flex-start"}}>
+            {uploading ? "Uploading…" : "Add music"}
+          </button>
+        </div>
+      </div>
+
+      <div className="brush" style={{fontSize:15,fontWeight:800,marginBottom:6}}>Library ({musicLibrary.length})</div>
+      {musicLibrary.length===0 ? (
+        <div style={{color:"var(--paper-faint)",fontSize:13,padding:"12px 0"}}>No tracks uploaded yet.</div>
+      ) : musicLibrary.map(track=>(
+        <div key={track.id} className="music-row">
+          <div className="music-row-blob">♪</div>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:13,fontWeight:700,color:"var(--paper)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{track.title}</div>
+            <div style={{fontSize:11,color:"var(--paper-dim)"}}>prod. {track.producer}</div>
+          </div>
+          <button className="btn btn-danger btn-sm" onClick={()=>handleRemove(track)}>Remove</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+
+function HomePage({library,libraryLoading,bookmarks,setBookmarks,toast,navigate}) {
   const [search,setSearch]=useState("");
   const [filterGenre,setFilterGenre]=useState("");
   const [filterType,setFilterType]=useState("");
@@ -441,7 +762,7 @@ function HomePage({library,libraryLoading,bookmarks,setBookmarks,toast,setView,s
       <div style={{marginBottom:28,overflow:"hidden"}}>
         <div className="scroll-x" style={{display:"flex",gap:12,paddingBottom:4}}>
           {library.slice(0,3).map((m)=>(
-            <div key={m.id} onClick={()=>{setCurrentManga(m);setView("detail");}} className="ink-ripple halftone"
+            <div key={m.id} onClick={()=>navigate(seriesPath(m))} className="ink-ripple halftone"
               style={{flexShrink:0,width:280,overflow:"hidden",position:"relative",cursor:"pointer",
                 background:"var(--ink-soft)",
                 border:"1px solid var(--line-strong)",minHeight:140,display:"flex",alignItems:"flex-end"}}>
@@ -496,7 +817,7 @@ function HomePage({library,libraryLoading,bookmarks,setBookmarks,toast,setView,s
         </div>
       ):(
         <div className="manga-grid">
-          {filtered.map(m=><MangaCard key={m.id} manga={m} bookmarks={bookmarks} setBookmarks={setBookmarks} toast={toast} onClick={()=>{setCurrentManga(m);setView("detail");}}/>)}
+          {filtered.map(m=><MangaCard key={m.id} manga={m} bookmarks={bookmarks} setBookmarks={setBookmarks} toast={toast} onClick={()=>navigate(seriesPath(m))}/>)}
         </div>
       )}
     </div>
@@ -539,7 +860,7 @@ function MangaCard({manga,bookmarks,setBookmarks,toast,onClick}) {
    shown inline), replacing the old series-wide Comments tab.
    ========================================================================== */
 
-function DetailPage({manga,setManga,bookmarks,setBookmarks,toast,setView,setReaderState,user}) {
+function DetailPage({manga,setManga,bookmarks,setBookmarks,toast,navigate,user}) {
   const [tab,setTab]=useState("chapters");
   const [liked,setLiked]=useLocalStorage(`liked-${manga.id}`,false);
   const [disliked,setDisliked]=useLocalStorage(`disliked-${manga.id}`,false);
@@ -547,13 +868,16 @@ function DetailPage({manga,setManga,bookmarks,setBookmarks,toast,setView,setRead
   const [readChapters,setReadChapters]=useLocalStorage(`read-${manga.id}`,[]);
   const isBookmarked=bookmarks.includes(manga.id);
 
-  const startReading=(chapterIdx=0, opts={})=>{setReaderState({manga,chapterIdx,...opts});setView("reader");};
+  const startReading=(chapterIdx=0, opts={})=>{
+    const chapterNumber = manga.chapters[chapterIdx]?.number ?? chapterIdx+1;
+    navigate(seriesPath(manga, `/read/${chapterNumber}${opts.openComments?"?comments=1":""}`));
+  };
 
   const totalComments = manga.chapters.reduce((sum,c)=>sum+(c.comments?.length||0),0);
 
   return (
     <div style={{maxWidth:900,margin:"0 auto",padding:"20px"}}>
-      <button className="btn btn-ghost btn-sm" onClick={()=>setView("home")} style={{marginBottom:16}}>← Back</button>
+      <button className="btn btn-ghost btn-sm" onClick={()=>navigate("/")} style={{marginBottom:16}}>← Back</button>
       <div style={{display:"flex",gap:20,marginBottom:24,flexWrap:"wrap"}}>
         <div style={{flexShrink:0,width:140,overflow:"hidden",border:"1px solid var(--line-strong)"}}>
           <img src={manga.cover} alt={manga.title} style={{width:"100%",display:"block"}} loading="lazy"/>
@@ -721,8 +1045,7 @@ function CommentItem({comment,user,toast,onDelete,onJumpToPage}) {
    comment drawer that opens in place (no losing your reading position).
    ========================================================================== */
 
-function ReaderPage({readerState,setReaderState,toast,setView,onUpdateChapterComments,user}) {
-  const {manga,chapterIdx,openComments}=readerState;
+function ReaderPage({manga,chapterIdx,openComments,toast,navigate,onUpdateChapterComments,user}) {
   const chapter=manga.chapters[chapterIdx];
   const pages = chapter.pages;
   const [progress,setProgress]=useState(0);
@@ -754,7 +1077,7 @@ function ReaderPage({readerState,setReaderState,toast,setView,onUpdateChapterCom
   const goChapter=(delta)=>{
     const nextIdx=chapterIdx+delta;
     if(nextIdx<0||nextIdx>=manga.chapters.length){toast(delta>0?"You've finished all chapters":"This is the first chapter","warn");return;}
-    setReaderState({manga,chapterIdx:nextIdx});
+    navigate(seriesPath(manga, `/read/${manga.chapters[nextIdx].number}`));
     containerRef.current?.scrollTo(0,0);
   };
 
@@ -790,7 +1113,7 @@ function ReaderPage({readerState,setReaderState,toast,setView,onUpdateChapterCom
         <div style={{height:"100%",width:`${progress}%`,background:"var(--paper)",transition:"width 0.1s"}}/>
       </div>
       <div style={{position:"absolute",top:0,left:0,right:0,zIndex:9,background:"rgba(10,10,10,0.92)",backdropFilter:"blur(12px)",borderBottom:"1px solid var(--line)",padding:"10px 16px",display:"flex",alignItems:"center",gap:10,transform:showNav?"translateY(0)":"translateY(-100%)",transition:"transform 0.3s ease"}}>
-        <button className="btn btn-ghost btn-sm btn-icon" onClick={()=>setView("detail")}>←</button>
+        <button className="btn btn-ghost btn-sm btn-icon" onClick={()=>navigate(seriesPath(manga))}>←</button>
         <div style={{flex:1,minWidth:0}}>
           <div className="brush" style={{fontSize:13,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{manga.title}</div>
           <div style={{fontSize:11,color:"var(--paper-faint)"}}>{chapter.title} · Page {currentPage+1}/{pages.length}</div>
@@ -1109,233 +1432,6 @@ function AuthTrailer() {
 // ── CPU-efficient InkVault cinematic trailer ────────────────────────────────
 // Runs at 30fps (not 60), caps particles at 60, pre-renders grain once,
 // pauses when tab is hidden, and cancels RAF instantly on unmount/auth success.
-function AuthTrailer() {
-  const canvasRef = useRef(null);
-  useEffect(() => {
-    const C = canvasRef.current;
-    if (!C) return;
-    const ctx = C.getContext('2d');
-    const W = C.width, H = C.height;
-
-    // Pre-render grain texture once — never regenerated
-    const noiseC = document.createElement('canvas');
-    noiseC.width = W; noiseC.height = H;
-    const nctx = noiseC.getContext('2d');
-    const id = nctx.createImageData(W, H);
-    for (let i = 0; i < id.data.length; i += 4) {
-      const v = Math.floor(Math.random() * 25);
-      id.data[i] = id.data[i+1] = id.data[i+2] = v;
-      id.data[i+3] = Math.random() * 35;
-    }
-    nctx.putImageData(id, 0, 0);
-
-    const INK = '#0A0A0A', PAPER = '#F4F2ED', SEAL = '#C8312A';
-    const PAPER_DIM = '#B9B6AC', PAPER_FAINT = '#6E6C65';
-    const lerp = (a,b,t) => a+(b-a)*t;
-    const clamp = (v,a,b) => Math.max(a,Math.min(b,v));
-    const easeOut = t => 1-Math.pow(1-t,3);
-    const easeOutBack = t => { const c1=1.70158,c3=c1+1; return 1+c3*Math.pow(t-1,3)+c1*Math.pow(t-1,2); };
-    const mapRange = (t,a,b) => clamp((t-a)/(b-a),0,1);
-
-    let particles = [];
-    class Particle {
-      constructor(x,y,opts={}) {
-        this.x=x; this.y=y;
-        this.vx=(Math.random()-.5)*(opts.speed||2);
-        this.vy=(Math.random()-.5)*(opts.speed||2);
-        this.life=1; this.decay=opts.decay||.018;
-        this.size=opts.size||Math.random()*2+.8;
-        this.color=opts.color||PAPER;
-        this.gravity=opts.gravity||0;
-      }
-      update() { this.x+=this.vx; this.y+=this.vy; this.vy+=this.gravity; this.vx*=.97; this.vy*=.97; this.life-=this.decay; }
-      draw() {
-        ctx.save(); ctx.globalAlpha=Math.max(0,this.life); ctx.fillStyle=this.color;
-        ctx.beginPath(); ctx.arc(this.x,this.y,this.size,0,Math.PI*2); ctx.fill(); ctx.restore();
-      }
-    }
-    const spawnP = (x,y,n,opts) => { for(let i=0;i<n&&particles.length<60;i++) particles.push(new Particle(x,y,opts)); };
-
-    const bg   = (c,a=1) => { ctx.save(); ctx.globalAlpha=a; ctx.fillStyle=c; ctx.fillRect(0,0,W,H); ctx.restore(); };
-    const rect = (x,y,w,h,c,a=1) => { ctx.save(); ctx.globalAlpha=a; ctx.fillStyle=c; ctx.fillRect(x,y,w,h); ctx.restore(); };
-    const grain = (a=.03) => { ctx.save(); ctx.globalAlpha=a; ctx.drawImage(noiseC,0,0); ctx.restore(); };
-    const vignette = (s=.7) => {
-      const g = ctx.createRadialGradient(W/2,H/2,H*.15,W/2,H/2,H*.65);
-      g.addColorStop(0,'rgba(0,0,0,0)'); g.addColorStop(1,`rgba(0,0,0,${s})`);
-      ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
-    };
-    const sf = (size,weight,family='sans-serif') => { ctx.font=`${weight} ${size}px ${family}`; };
-    const rule = (x,y,mw,t,color=PAPER_FAINT,a=.45) => {
-      const w=easeOut(clamp(t,0,1))*mw; if(w<1) return;
-      ctx.save(); ctx.globalAlpha=a; ctx.strokeStyle=color; ctx.lineWidth=1;
-      ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x+w,y); ctx.stroke(); ctx.restore();
-    };
-    const animText = (text,cx,cy,t,opts={}) => {
-      const{color=PAPER,size=28,weight='700',family='Shippori Mincho,serif'}=opts;
-      sf(size,weight,family); ctx.textBaseline='middle'; ctx.textAlign='center';
-      const tw=ctx.measureText(text).width; let ox=cx-tw/2;
-      for(let i=0;i<text.length;i++){
-        const ch=text[i]; const delay=i*.05;
-        const p=clamp((t-delay)/.3,0,1);
-        ctx.save(); ctx.globalAlpha=p; ctx.fillStyle=color;
-        ctx.translate(ox,cy+(1-easeOut(p))*12);
-        ctx.fillText(ch,ctx.measureText(ch).width/2,0); ctx.restore();
-        ox+=ctx.measureText(ch).width;
-      }
-    };
-
-    // Scene 0 — cold open logo reveal (frames 0–149)
-    const scene0 = lt => {
-      bg('#000');
-      const logoT = mapRange(lt,.4,1);
-      if(logoT>0){
-        ctx.save(); ctx.globalAlpha=easeOut(logoT)*.85; ctx.fillStyle=PAPER;
-        sf(Math.round(lerp(48,38,easeOut(logoT))),'800','Shippori Mincho,serif');
-        ctx.textAlign='center'; ctx.textBaseline='middle';
-        ctx.fillText('InkVault',W/2,H/2); ctx.restore();
-      }
-      const tagT = mapRange(lt,.65,1);
-      if(tagT>0){
-        ctx.save(); ctx.globalAlpha=easeOut(tagT)*.6; ctx.fillStyle=PAPER_DIM;
-        sf(10,'600'); ctx.textAlign='center'; ctx.textBaseline='middle';
-        ctx.fillText('WHERE STORIES LIVE IN INK',W/2,H/2+38); ctx.restore();
-      }
-      vignette(.88); grain(.04);
-    };
-
-    // Scene 1 — hero statement (frames 150–509)
-    const scene1 = lt => {
-      bg(INK);
-      animText('Manga without',W/2,H*.42,mapRange(lt,.1,.55)*8,{size:36,weight:'800'});
-      const h2t = mapRange(lt,.22,.62);
-      if(h2t>0){
-        ctx.save(); ctx.globalAlpha=easeOut(clamp(h2t*3,0,1)); ctx.fillStyle=SEAL;
-        sf(36,'800','Shippori Mincho,serif'); ctx.textAlign='center'; ctx.textBaseline='middle';
-        const sc = lerp(1.12,1,easeOutBack(clamp(h2t*2,0,1)));
-        ctx.translate(W/2,H*.64); ctx.scale(sc,sc); ctx.fillText('compromise.',0,0); ctx.restore();
-      }
-      rule(W/2-110,H*.82,220,mapRange(lt,.55,1),PAPER_FAINT,.3);
-      vignette(.55); grain(.03);
-    };
-
-    // Scene 2 — stats (frames 510–809)
-    const scene2 = lt => {
-      bg(INK);
-      const stats=[
-        {label:'Series',    val:12000, x:W*.22},
-        {label:'Chapters',  val:240000,x:W*.5, hi:true},
-        {label:'Readers',   val:98000, x:W*.78},
-      ];
-      stats.forEach((s,i) => {
-        const delay=i*.12;
-        const p=mapRange(lt,.05+delay,.55+delay); if(p<=0) return;
-        const alpha=easeOut(p);
-        const barH=easeOut(mapRange(lt,.1+delay,.65+delay))*H*.3;
-        rect(s.x-1,H*.62-barH,2,barH,s.hi?SEAL:PAPER,alpha*.4);
-        const nv=Math.floor(easeOut(mapRange(lt,.1+delay,.75+delay))*s.val);
-        const ns=nv>=1000?Math.floor(nv/1000)+'K':String(nv);
-        ctx.save(); ctx.globalAlpha=alpha; ctx.fillStyle=s.hi?SEAL:PAPER;
-        sf(28,'800','Shippori Mincho,serif'); ctx.textAlign='center'; ctx.textBaseline='alphabetic';
-        ctx.fillText(ns,s.x,H*.62); ctx.restore();
-        ctx.save(); ctx.globalAlpha=alpha*.65; ctx.fillStyle=PAPER_DIM;
-        sf(10,'600'); ctx.textAlign='center'; ctx.textBaseline='top';
-        ctx.fillText(s.label.toUpperCase(),s.x,H*.64); ctx.restore();
-        if(Math.random()<.2) spawnP(s.x,H*.62-barH,1,{speed:2,decay:.05,size:1.5,color:s.hi?SEAL:PAPER,gravity:-.02});
-      });
-      vignette(.5); grain(.03);
-    };
-
-    // Scene 3 — finale CTA (frames 810–1319)
-    const scene3 = lt => {
-      bg('#000');
-      // Radiating lines — drawn cheap with stroke, no per-pixel ops
-      ctx.save();
-      for(let i=0;i<20;i++){
-        const angle=i/20*Math.PI*2;
-        const p=mapRange(lt,.08,.55);
-        const len=easeOut(p)*H*.7;
-        ctx.strokeStyle=PAPER; ctx.lineWidth=.4;
-        ctx.globalAlpha=easeOut(p)*.05;
-        ctx.beginPath(); ctx.moveTo(W/2,H/2); ctx.lineTo(W/2+Math.cos(angle)*len,H/2+Math.sin(angle)*len); ctx.stroke();
-      }
-      ctx.restore();
-      vignette(.92);
-      const logoT=mapRange(lt,0,.38);
-      if(logoT>0){
-        const sc=lerp(0,1,easeOutBack(logoT));
-        ctx.save(); ctx.translate(W/2,H*.35); ctx.scale(sc,sc); ctx.translate(-W/2,-H*.35);
-        ctx.globalAlpha=easeOut(logoT); ctx.fillStyle=PAPER;
-        sf(42,'800','Shippori Mincho,serif'); ctx.textAlign='center'; ctx.textBaseline='middle';
-        ctx.fillText('InkVault',W/2,H*.35); ctx.restore();
-      }
-      const tagT=mapRange(lt,.32,.6);
-      if(tagT>0) animText('Your vault is waiting.',W/2,H*.55,tagT*8,{size:18,weight:'800'});
-      const subT=mapRange(lt,.48,.72);
-      if(subT>0){
-        ctx.save(); ctx.globalAlpha=easeOut(subT); ctx.fillStyle=PAPER_DIM;
-        sf(11,'400'); ctx.textAlign='center'; ctx.textBaseline='middle';
-        ctx.fillText('No ads. No distractions. Just stories.',W/2,H*.66); ctx.restore();
-      }
-      const ctaT=mapRange(lt,.62,.86);
-      if(ctaT>0){
-        ctx.save(); ctx.globalAlpha=easeOut(ctaT);
-        const bW=164,bH=36,bX=W/2-bW-8,bY=H*.76;
-        ctx.fillStyle=PAPER; ctx.fillRect(bX,bY,bW,bH);
-        ctx.fillStyle=INK; sf(10,'700'); ctx.textAlign='center'; ctx.textBaseline='middle';
-        ctx.fillText('START READING FREE →',bX+bW/2,bY+bH/2);
-        ctx.strokeStyle='rgba(244,242,237,0.28)'; ctx.lineWidth=1;
-        ctx.strokeRect(W/2+8,bY,bW,bH);
-        ctx.fillStyle=PAPER_DIM; ctx.fillText('BROWSE LIBRARY',W/2+8+bW/2,bY+bH/2);
-        ctx.restore();
-        if(Math.random()<.06) spawnP(W/2+(Math.random()-.5)*160,H*.76+Math.random()*36,1,{speed:.4,decay:.007,size:1.2,color:PAPER_FAINT,gravity:-.008});
-      }
-      const fadeT=mapRange(lt,.87,1);
-      bg(`rgba(0,0,0,${fadeT*fadeT})`);
-      grain(.04);
-    };
-
-    const TOTAL=1320;
-    const SCENES=[{s:0,e:150},{s:150,e:510},{s:510,e:810},{s:810,e:1320}];
-    const SCENE_FNS=[scene0,scene1,scene2,scene3];
-    const FPS_INTERVAL=1000/30; // 30fps cap
-    let frame=0, raf=null, lastT=0;
-
-    const loop = ts => {
-      if(ts-lastT<FPS_INTERVAL){ raf=requestAnimationFrame(loop); return; }
-      lastT=ts;
-      ctx.clearRect(0,0,W,H);
-      bg('#000');
-      SCENES.forEach((sc,i)=>{
-        if(frame<sc.s||frame>=sc.e) return;
-        SCENE_FNS[i]((frame-sc.s)/(sc.e-sc.s));
-      });
-      particles=particles.filter(p=>{p.update();p.draw();return p.life>0});
-      frame=(frame+1)%TOTAL;
-      raf=requestAnimationFrame(loop);
-    };
-
-    const pause  = () => { if(raf){ cancelAnimationFrame(raf); raf=null; } };
-    const resume = () => { if(!raf) raf=requestAnimationFrame(loop); };
-    document.addEventListener('visibilitychange', ()=>document.hidden?pause():resume());
-    raf=requestAnimationFrame(loop);
-
-    return () => {
-      pause();
-      document.removeEventListener('visibilitychange', ()=>document.hidden?pause():resume());
-    };
-  }, []);
-
-  return (
-    <canvas
-      ref={canvasRef}
-      width={640}
-      height={240}
-      style={{ display:'block', width:'100%', height:'240px', objectFit:'cover' }}
-    />
-  );
-}
-
-// ── Updated AuthModal — trailer plays behind the form ──────────────────────
 function AuthModal({onClose, onLogin, toast}) {
   const [mode,setMode]   = useState("login");
   const [email,setEmail] = useState("");
@@ -1463,316 +1559,6 @@ function AuthModal({onClose, onLogin, toast}) {
     </div>
   );
 }
-function AuthTrailer() {
-  const canvasRef = useRef(null);
-  useEffect(() => {
-    const C = canvasRef.current; if(!C) return;
-    const ctx = C.getContext('2d');
-    const W = C.width, H = C.height;
-    const noiseC = document.createElement('canvas');
-    noiseC.width=W; noiseC.height=H;
-    const nctx = noiseC.getContext('2d');
-    const id = nctx.createImageData(W,H);
-    for(let i=0;i<id.data.length;i+=4){const v=Math.floor(Math.random()*25);id.data[i]=id.data[i+1]=id.data[i+2]=v;id.data[i+3]=Math.random()*35;}
-    nctx.putImageData(id,0,0);
-    const PAPER='#F4F2ED',SEAL='#C8312A',PAPER_DIM='#B9B6AC',PAPER_FAINT='#6E6C65';
-    const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-    const easeOut=t=>1-Math.pow(1-t,3);
-    const easeOutBack=t=>{const c1=1.70158,c3=c1+1;return 1+c3*Math.pow(t-1,3)+c1*Math.pow(t-1,2);};
-    const mapRange=(t,a,b)=>clamp((t-a)/(b-a),0,1);
-    const lerp=(a,b,t)=>a+(b-a)*t;
-    let particles=[];
-    const spawnP=(x,y,n,opts)=>{for(let i=0;i<n&&particles.length<60;i++)particles.push({x,y,vx:(Math.random()-.5)*(opts.speed||2),vy:(Math.random()-.5)*(opts.speed||2),life:1,decay:opts.decay||.018,size:opts.size||Math.random()*2+.8,color:opts.color||PAPER,gravity:opts.gravity||0});};
-    const bg=(c,a=1)=>{ctx.save();ctx.globalAlpha=a;ctx.fillStyle=c;ctx.fillRect(0,0,W,H);ctx.restore();};
-    const grain=(a=.03)=>{ctx.save();ctx.globalAlpha=a;ctx.drawImage(noiseC,0,0);ctx.restore();};
-    const vignette=(s=.7)=>{const g=ctx.createRadialGradient(W/2,H/2,H*.15,W/2,H/2,H*.65);g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(1,`rgba(0,0,0,${s})`);ctx.fillStyle=g;ctx.fillRect(0,0,W,H);};
-    const sf=(size,weight,family='sans-serif')=>{ctx.font=`${weight} ${size}px ${family}`;};
-    const animText=(text,cx,cy,t,opts={})=>{
-      const{color=PAPER,size=28,weight='700',family='serif'}=opts;
-      sf(size,weight,family);ctx.textBaseline='middle';ctx.textAlign='center';
-      const tw=ctx.measureText(text).width;let ox=cx-tw/2;
-      for(let i=0;i<text.length;i++){const ch=text[i];const p=clamp((t-i*.05)/.3,0,1);ctx.save();ctx.globalAlpha=p;ctx.fillStyle=color;ctx.translate(ox,cy+(1-easeOut(p))*12);ctx.fillText(ch,ctx.measureText(ch).width/2,0);ctx.restore();ox+=ctx.measureText(ch).width;}
-    };
-    const scene0=lt=>{bg('#000');const logoT=mapRange(lt,.4,1);if(logoT>0){ctx.save();ctx.globalAlpha=easeOut(logoT)*.85;ctx.fillStyle=PAPER;sf(Math.round(lerp(48,38,easeOut(logoT))),'800','serif');ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('InkVault',W/2,H/2);ctx.restore();}const tagT=mapRange(lt,.65,1);if(tagT>0){ctx.save();ctx.globalAlpha=easeOut(tagT)*.6;ctx.fillStyle=PAPER_DIM;sf(10,'600');ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('WHERE STORIES LIVE IN INK',W/2,H/2+38);ctx.restore();}vignette(.88);grain(.04);};
-    const scene1=lt=>{bg('#0A0A0A');animText('Manga without',W/2,H*.42,mapRange(lt,.1,.55)*8,{size:36,weight:'800'});const h2t=mapRange(lt,.22,.62);if(h2t>0){ctx.save();ctx.globalAlpha=easeOut(clamp(h2t*3,0,1));ctx.fillStyle=SEAL;sf(36,'800','serif');ctx.textAlign='center';ctx.textBaseline='middle';const sc=lerp(1.12,1,easeOutBack(clamp(h2t*2,0,1)));ctx.translate(W/2,H*.64);ctx.scale(sc,sc);ctx.fillText('compromise.',0,0);ctx.restore();}vignette(.55);grain(.03);};
-    const scene2=lt=>{bg('#0A0A0A');const stats=[{label:'Series',val:12000,x:W*.22},{label:'Chapters',val:240000,x:W*.5,hi:true},{label:'Readers',val:98000,x:W*.78}];stats.forEach((s,i)=>{const delay=i*.12;const p=mapRange(lt,.05+delay,.55+delay);if(p<=0)return;const alpha=easeOut(p);const barH=easeOut(mapRange(lt,.1+delay,.65+delay))*H*.3;ctx.save();ctx.globalAlpha=alpha*.4;ctx.fillStyle=s.hi?SEAL:PAPER;ctx.fillRect(s.x-1,H*.62-barH,2,barH);ctx.restore();const nv=Math.floor(easeOut(mapRange(lt,.1+delay,.75+delay))*s.val);const ns=nv>=1000?Math.floor(nv/1000)+'K':String(nv);ctx.save();ctx.globalAlpha=alpha;ctx.fillStyle=s.hi?SEAL:PAPER;sf(28,'800','serif');ctx.textAlign='center';ctx.textBaseline='alphabetic';ctx.fillText(ns,s.x,H*.62);ctx.restore();ctx.save();ctx.globalAlpha=alpha*.65;ctx.fillStyle=PAPER_DIM;sf(10,'600');ctx.textAlign='center';ctx.textBaseline='top';ctx.fillText(s.label.toUpperCase(),s.x,H*.64);ctx.restore();if(Math.random()<.2)spawnP(s.x,H*.62-barH,1,{speed:2,decay:.05,size:1.5,color:s.hi?SEAL:PAPER,gravity:-.02});});vignette(.5);grain(.03);};
-    const scene3=lt=>{bg('#000');ctx.save();for(let i=0;i<20;i++){const angle=i/20*Math.PI*2;const p=mapRange(lt,.08,.55);const len=easeOut(p)*H*.7;ctx.strokeStyle=PAPER;ctx.lineWidth=.4;ctx.globalAlpha=easeOut(p)*.05;ctx.beginPath();ctx.moveTo(W/2,H/2);ctx.lineTo(W/2+Math.cos(angle)*len,H/2+Math.sin(angle)*len);ctx.stroke();}ctx.restore();vignette(.92);const logoT=mapRange(lt,0,.38);if(logoT>0){const sc=lerp(0,1,easeOutBack(logoT));ctx.save();ctx.translate(W/2,H*.35);ctx.scale(sc,sc);ctx.translate(-W/2,-H*.35);ctx.globalAlpha=easeOut(logoT);ctx.fillStyle=PAPER;sf(42,'800','serif');ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('InkVault',W/2,H*.35);ctx.restore();}const tagT=mapRange(lt,.32,.6);if(tagT>0)animText('Your vault is waiting.',W/2,H*.55,tagT*8,{size:18,weight:'800'});const ctaT=mapRange(lt,.62,.86);if(ctaT>0){ctx.save();ctx.globalAlpha=easeOut(ctaT);const bW=164,bH=36,bX=W/2-bW-8,bY=H*.76;ctx.fillStyle=PAPER;ctx.fillRect(bX,bY,bW,bH);ctx.fillStyle='#0A0A0A';sf(10,'700');ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('START READING FREE →',bX+bW/2,bY+bH/2);ctx.strokeStyle='rgba(244,242,237,0.28)';ctx.lineWidth=1;ctx.strokeRect(W/2+8,bY,bW,bH);ctx.fillStyle=PAPER_DIM;ctx.fillText('BROWSE LIBRARY',W/2+8+bW/2,bY+bH/2);ctx.restore();}const fadeT=mapRange(lt,.87,1);bg(`rgba(0,0,0,${fadeT*fadeT})`);grain(.04);};
-    const TOTAL=1320,SCENES=[{s:0,e:150},{s:150,e:510},{s:510,e:810},{s:810,e:1320}],FNS=[scene0,scene1,scene2,scene3];
-    const INTERVAL=1000/30;let frame=0,raf=null,lastT=0;
-    const loop=ts=>{if(ts-lastT<INTERVAL){raf=requestAnimationFrame(loop);return;}lastT=ts;ctx.clearRect(0,0,W,H);bg('#000');SCENES.forEach((sc,i)=>{if(frame<sc.s||frame>=sc.e)return;FNS[i]((frame-sc.s)/(sc.e-sc.s));});particles=particles.filter(p=>{p.x+=p.vx;p.y+=p.vy;p.vy+=p.gravity;p.vx*=.97;p.vy*=.97;p.life-=p.decay;if(p.life>0){ctx.save();ctx.globalAlpha=p.life;ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(p.x,p.y,p.size,0,Math.PI*2);ctx.fill();ctx.restore();}return p.life>0;});frame=(frame+1)%TOTAL;raf=requestAnimationFrame(loop);};
-    const pause=()=>{if(raf){cancelAnimationFrame(raf);raf=null;}};
-    const resume=()=>{if(!raf)raf=requestAnimationFrame(loop);};
-    const onVis=()=>document.hidden?pause():resume();
-    document.addEventListener('visibilitychange',onVis);
-    raf=requestAnimationFrame(loop);
-    return()=>{pause();document.removeEventListener('visibilitychange',onVis);};
-  },[]);
-  return <canvas ref={canvasRef} width={640} height={240} style={{display:'block',width:'100%',height:'240px',objectFit:'cover'}}/>;
-}
-// ── Updated AuthModal — trailer plays behind the form ──────────────────────
-function AuthModal({onClose, onLogin, toast}) {
-  const [mode,setMode]   = useState("login");
-  const [email,setEmail] = useState("");
-  const [username,setUsername] = useState("");
-  const [password,setPassword] = useState("");
-  const [adminCode,setAdminCode] = useState("");
-  const [loading,setLoading] = useState(false);
-  const [error,setError]   = useState("");
-
-  const submit = async () => {
-    if(!email.trim()||!password){ setError("Email and password are required."); return; }
-    if(mode==="register"&&!username.trim()){ setError("Choose a username."); return; }
-    setError(""); setLoading(true);
-    try {
-      if(mode==="login"){
-        const{data,error}=await supabase.auth.signInWithPassword({email:email.trim(),password});
-        if(error) throw error;
-        await onLogin(data.user); onClose();
-      } else {
-        const{data,error}=await supabase.auth.signUp({
-          email:email.trim(),password,options:{data:{username:username.trim()}}
-        });
-        if(error) throw error;
-        if(data.user&&data.user.identities&&data.user.identities.length===0){
-          setError("That email is already registered."); setLoading(false); return;
-        }
-        if(!data.session){
-          toast("Account created — check your email to confirm, then sign in.","success");
-          setMode("login"); return;
-        }
-        if(adminCode.trim()){
-          const{data:redeemed,error:redeemError}=await supabase.rpc("redeem_admin_code",{input_code:adminCode.trim()});
-          if(redeemError||!redeemed) toast("Admin code was invalid or already used.","warn");
-          else toast("Admin access granted.","success");
-        }
-        await onLogin(data.user); onClose();
-      }
-    } catch(err) {
-      let message="Something went wrong. Please try again.";
-      if(err){
-        if(typeof err==="string") message=err;
-        else if(err.message) message=err.message;
-        else if(err.error_description) message=err.error_description;
-      }
-      setError(message);
-    } finally { setLoading(false); }
-  };
-
-  return (
-    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
-      <div style={{
-        background:'var(--ink-soft)',
-        border:'1px solid var(--line-strong)',
-        borderRadius:2,
-        width:'100%',
-        maxWidth:460,
-        maxHeight:'90vh',
-        overflowY:'auto',
-        animation:'fadeUp 0.25s ease',
-      }}>
-        {/* ── Trailer banner ─────────────────────────────────────────── */}
-        <div style={{position:'relative',overflow:'hidden',borderBottom:'1px solid var(--line)'}}>
-          <AuthTrailer />
-          <div style={{
-            position:'absolute',inset:0,
-            background:'linear-gradient(to bottom, transparent 55%, rgba(21,21,21,0.96) 100%)',
-            pointerEvents:'none',
-          }}/>
-          <div style={{position:'absolute',bottom:12,left:16,pointerEvents:'none'}}>
-            <img src={ASSET_LOGO_NAV} alt="InkVault"
-              style={{height:18,width:'auto',display:'block',filter:'invert(1) brightness(1.4)',opacity:.9}}/>
-          </div>
-        </div>
-
-        {/* ── Auth form ──────────────────────────────────────────────── */}
-        <div style={{padding:'26px 28px 28px'}}>
-          <div className="brush" style={{fontSize:20,fontWeight:800,marginBottom:3}}>
-            {mode==="login"?"Welcome back":"Join InkVault"}
-          </div>
-          <div style={{color:'var(--paper-faint)',fontSize:12.5,marginBottom:20}}>
-            {mode==="login"?"Sign in to your account":"Create your free account"}
-          </div>
-
-          <div style={{display:'flex',flexDirection:'column',gap:10,marginBottom:6}}>
-            <input className="input" type="email" placeholder="Email"
-              value={email} onChange={e=>setEmail(e.target.value)}
-              onKeyDown={e=>e.key==="Enter"&&submit()}/>
-            {mode==="register"&&(
-              <input className="input" placeholder="Username"
-                value={username} onChange={e=>setUsername(e.target.value)}
-                onKeyDown={e=>e.key==="Enter"&&submit()}/>
-            )}
-            <input className="input" type="password" placeholder="Password"
-              value={password} onChange={e=>setPassword(e.target.value)}
-              onKeyDown={e=>e.key==="Enter"&&submit()}/>
-            {mode==="register"&&(
-              <input className="input" placeholder="Admin code (optional)"
-                value={adminCode} onChange={e=>setAdminCode(e.target.value)}
-                onKeyDown={e=>e.key==="Enter"&&submit()}/>
-            )}
-          </div>
-
-          {error&&<div style={{color:'var(--seal)',fontSize:12.5,marginTop:8,marginBottom:2}}>{error}</div>}
-
-          <button className="btn btn-primary" onClick={submit} disabled={loading}
-            style={{width:'100%',marginTop:14}}>
-            {loading?"Please wait…":(mode==="login"?"Sign In":"Create Account")}
-          </button>
-
-          <div style={{textAlign:'center',marginTop:14,fontSize:12.5,color:'var(--paper-faint)'}}>
-            {mode==="login"?"No account?":"Already have one?"}
-            <button onClick={()=>{setMode(mode==="login"?"register":"login");setError("");}}
-              style={{color:'var(--paper)',marginLeft:4,cursor:'pointer',fontWeight:700,textDecoration:'underline'}}>
-              {mode==="login"?"Sign up":"Sign in"}
-            </button>
-          </div>
-
-          {mode==="register"&&(
-            <div style={{marginTop:14,padding:'10px 12px',border:'1px solid var(--line)',fontSize:11.5,color:'var(--paper-faint)',lineHeight:1.5}}>
-              Have an admin code from the InkVault team? Enter it above — it's single-use and grants admin access immediately. Leave it blank for a normal reader account.
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-  const [mode,setMode]=useState("login");
-  const [email,setEmail]=useState("");
-  const [username,setUsername]=useState("");
-  const [password,setPassword]=useState("");
-  const [adminCode,setAdminCode]=useState("");
-  const [loading,setLoading]=useState(false);
-  const [error,setError]=useState("");
-
-  const submit = async () => {
-    if (!email.trim() || !password) { setError("Email and password are required."); return; }
-    if (mode==="register" && !username.trim()) { setError("Choose a username."); return; }
-    setError(""); setLoading(true);
-
-    try {
-      if (mode === "login") {
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email: email.trim(), password,
-        });
-        if (error) throw error;
-        await onLogin(data.user);
-        onClose();
-      } else {
-        const { data, error } = await supabase.auth.signUp({
-          email: email.trim(), password,
-          options: { data: { username: username.trim() } },
-        });
-        if (error) throw error;
-
-        // Supabase quirk: signing up again with an email that's already
-        // registered but never confirmed returns success with no error,
-        // but an empty/fake identities array instead of a real new user.
-        if (data.user && data.user.identities && data.user.identities.length === 0) {
-          setError("That email is already registered. Check your inbox for the confirmation link, or sign in if you've already confirmed it.");
-          setLoading(false);
-          return;
-        }
-
-        // With email confirmation enabled (Supabase's default), signUp
-        // succeeds but returns no session until the user clicks the
-        // confirmation link — there's nothing more to do here yet.
-        if (!data.session) {
-          toast("Account created — check your email to confirm, then sign in.", "success");
-          setMode("login");
-          return;
-        }
-
-        // If an admin code was entered, redeem it now that we have a session.
-        if (adminCode.trim()) {
-          const { data: redeemed, error: redeemError } = await supabase.rpc(
-            "redeem_admin_code", { input_code: adminCode.trim() }
-          );
-          if (redeemError || !redeemed) {
-            toast("Account created, but that admin code was invalid or already used.", "warn");
-          } else {
-            toast("Admin access granted.", "success");
-          }
-        }
-        await onLogin(data.user);
-        onClose();
-      }
-    } catch (err) {
-      console.error("Auth error:", err);
-      let message = "Something went wrong. Please try again.";
-      if (err) {
-        if (typeof err === "string") message = err;
-        else if (err.message) message = err.message;
-        else if (err.error_description) message = err.error_description;
-        else if (err.msg) message = err.msg;
-        else {
-          try {
-            const asJson = JSON.stringify(err);
-            if (asJson && asJson !== "{}") message = asJson;
-          } catch {}
-        }
-      }
-      setError(message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
-      <div style={{background:'var(--ink-soft)',border:'1px solid var(--line-strong)',borderRadius:2,width:'100%',maxWidth:460,maxHeight:'90vh',overflowY:'auto',animation:'fadeUp 0.25s ease'}}>
-        <div style={{position:'relative',overflow:'hidden',borderBottom:'1px solid var(--line)'}}>
-          <AuthTrailer/>
-          <div style={{position:'absolute',inset:0,background:'linear-gradient(to bottom,transparent 55%,rgba(21,21,21,0.96) 100%)',pointerEvents:'none'}}/>
-          <div style={{position:'absolute',bottom:12,left:16,pointerEvents:'none'}}>
-            <img src={ASSET_LOGO_NAV} alt="InkVault" style={{height:18,width:'auto',display:'block',filter:'invert(1) brightness(1.4)',opacity:.9}}/>
-          </div>
-        </div>
-        <div style={{padding:'26px 28px 28px'}}>
-        <img src={ASSET_LOGO_LARGE} alt="InkVault" style={{height:26,width:"auto",filter:"invert(1) brightness(1.4)",marginBottom:18}}/>
-        <div className="brush" style={{fontSize:22,fontWeight:800,marginBottom:4}}>{mode==="login"?"Welcome back":"Join InkVault"}</div>
-        <div style={{color:"var(--paper-faint)",fontSize:13,marginBottom:22}}>{mode==="login"?"Sign in to your account":"Create your free account"}</div>
-
-        <div style={{display:"flex",flexDirection:"column",gap:12,marginBottom:6}}>
-          <input className="input" type="email" placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()}/>
-          {mode==="register" && (
-            <input className="input" placeholder="Username" value={username} onChange={e=>setUsername(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()}/>
-          )}
-          <input className="input" type="password" placeholder="Password" value={password} onChange={e=>setPassword(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()}/>
-          {mode==="register" && (
-            <input className="input" placeholder="Admin code (optional)" value={adminCode} onChange={e=>setAdminCode(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()}/>
-          )}
-        </div>
-
-        {error && <div style={{color:"var(--seal)",fontSize:12.5,marginTop:10}}>{error}</div>}
-
-        <button className="btn btn-primary" onClick={submit} disabled={loading} style={{width:"100%",marginTop:16}}>
-          {loading ? "Please wait…" : (mode==="login"?"Sign In":"Create Account")}
-        </button>
-
-        <div style={{textAlign:"center",marginTop:16,fontSize:13,color:"var(--paper-faint)"}}>
-          {mode==="login"?"No account?":"Already have one?"}
-          <button onClick={()=>{setMode(mode==="login"?"register":"login");setError("");}} style={{color:"var(--paper)",marginLeft:4,cursor:"pointer",fontWeight:700,textDecoration:"underline"}}>
-            {mode==="login"?"Sign up":"Sign in"}
-          </button>
-        </div>
-
-        {mode==="register" && (
-          <div style={{marginTop:14,padding:"10px 12px",border:"1px solid var(--line)",fontSize:11.5,color:"var(--paper-faint)",lineHeight:1.5}}>
-            Have an admin code from the InkVault team? Enter it above — it's single-use and grants admin access immediately. Leave it blank for a normal reader account.
-          </div>
-        )}
-      </div>
-      </div>
-    </div>
-  );
-}
-
-/* ============================================================================
-   Admin panel — real page uploader (file picker + drag & drop from
-   device/gallery), reorderable, removable, with live previews.
-   ========================================================================== */
-
 function PageUploader({pages, onAddPages, onRemovePage, onReorder, toast}) {
   const fileInputRef = useRef();
   const [dragOver, setDragOver] = useState(false);
@@ -1844,7 +1630,28 @@ function PageUploader({pages, onAddPages, onRemovePage, onReorder, toast}) {
   );
 }
 
-function AdminPanel({refetchLibrary,user,toast}) {
+function AdminPanel({library,refetchLibrary,user,toast,musicLibrary,refetchMusic}) {
+  const [adminTab,setAdminTab]=useState("manage");
+
+  return (
+    <div style={{maxWidth:980,margin:"0 auto",padding:"20px"}}>
+      <div style={{display:"flex",gap:0,marginBottom:24,border:"1px solid var(--line)",maxWidth:480}}>
+        {[["manage","Manage Library"],["upload","Upload New"],["music","Music"]].map(([id,label],i)=>(
+          <button key={id} onClick={()=>setAdminTab(id)} style={{flex:1,padding:"10px 12px",fontSize:11.5,fontWeight:700,letterSpacing:"0.04em",textTransform:"uppercase",
+            color:adminTab===id?"var(--paper)":"var(--paper-faint)",
+            borderBottom:adminTab===id?"2px solid var(--paper)":"2px solid transparent",
+            borderRight:i<2?"1px solid var(--line)":"none",
+          }}>{label}</button>
+        ))}
+      </div>
+      {adminTab==="manage" && <AdminLibraryManager library={library} refetchLibrary={refetchLibrary} toast={toast}/>}
+      {adminTab==="upload" && <AdminUploadWizard refetchLibrary={refetchLibrary} user={user} toast={toast}/>}
+      {adminTab==="music" && <AdminMusicManager musicLibrary={musicLibrary} refetchMusic={refetchMusic} toast={toast}/>}
+    </div>
+  );
+}
+
+function AdminUploadWizard({refetchLibrary,user,toast}) {
   const [step,setStep]=useState(1);
   const [form,setForm]=useState({title:"",author:"",description:"",type:"Manhwa",status:"Ongoing",genres:[],cover:"",chapters:[]});
   const [newChapterTitle,setNewChapterTitle]=useState("");
@@ -2142,7 +1949,493 @@ function CoverPicker({value, onChange, toast}) {
    Profile
    ========================================================================== */
 
-function ProfilePage({user,bookmarks,toast,signOut,setView}) {
+/* ============================================================================
+   Image Crop / Zoom / Rotate editor — used for cover replacement (and,
+   later, avatar uploads). Renders the image onto a canvas the size of the
+   final crop; the user can drag to pan, use the zoom slider, and rotate in
+   90° steps or fine-tune with the rotate slider. "Apply" exports a JPEG
+   data URL at 2x canvas resolution for a reasonably sharp result.
+   ========================================================================== */
+
+function ImageCropEditor({src, aspect=2/3, title="Adjust image", onCancel, onApply}) {
+  const canvasRef = useRef();
+  const imgRef = useRef(null);
+  const [ready, setReady] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [rotate90, setRotate90] = useState(0); // 0,1,2,3 = quarter turns
+  const [fineRotate, setFineRotate] = useState(0); // -45..45 degrees
+  const [offset, setOffset] = useState({x:0,y:0});
+  const dragRef = useRef(null);
+
+  const CANVAS_W = 280;
+  const CANVAS_H = Math.round(CANVAS_W / aspect);
+  const EXPORT_SCALE = 2;
+
+  useEffect(()=>{
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => { imgRef.current = img; setReady(true); };
+    img.onerror = () => { imgRef.current = null; setReady(false); };
+    img.src = src;
+  },[src]);
+
+  const totalRotation = (rotate90*90 + fineRotate) * Math.PI / 180;
+
+  const draw = useCallback((targetCanvas, scaleMul) => {
+    const img = imgRef.current;
+    if (!img || !targetCanvas) return;
+    const w = CANVAS_W * scaleMul, h = CANVAS_H * scaleMul;
+    targetCanvas.width = w; targetCanvas.height = h;
+    const ctx = targetCanvas.getContext("2d");
+    ctx.clearRect(0,0,w,h);
+    ctx.fillStyle = "#0A0A0A";
+    ctx.fillRect(0,0,w,h);
+
+    // Base scale: cover the canvas regardless of rotation, then apply zoom.
+    const rotated90 = rotate90 % 2 !== 0;
+    const iw = rotated90 ? img.height : img.width;
+    const ih = rotated90 ? img.width : img.height;
+    const coverScale = Math.max(w/iw, h/ih) * zoom;
+
+    ctx.save();
+    ctx.translate(w/2 + offset.x*scaleMul, h/2 + offset.y*scaleMul);
+    ctx.rotate(totalRotation);
+    ctx.scale(coverScale, coverScale);
+    ctx.drawImage(img, -img.width/2, -img.height/2);
+    ctx.restore();
+  },[zoom, rotate90, fineRotate, offset, totalRotation, CANVAS_W, CANVAS_H]);
+
+  useEffect(()=>{ if(ready) draw(canvasRef.current, 1); },[ready, draw]);
+
+  const onPointerDown = (e) => {
+    dragRef.current = { startX:e.clientX, startY:e.clientY, origin:{...offset} };
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  };
+  const onPointerMove = (e) => {
+    if (!dragRef.current) return;
+    const dx = e.clientX - dragRef.current.startX;
+    const dy = e.clientY - dragRef.current.startY;
+    setOffset({ x: dragRef.current.origin.x + dx, y: dragRef.current.origin.y + dy });
+  };
+  const onPointerUp = () => { dragRef.current = null; };
+
+  const apply = () => {
+    const exportCanvas = document.createElement("canvas");
+    draw(exportCanvas, EXPORT_SCALE);
+    onApply(exportCanvas.toDataURL("image/jpeg", 0.92));
+  };
+
+  return (
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onCancel()}>
+      <div className="modal" style={{maxWidth:380}}>
+        <div className="brush" style={{fontSize:16,fontWeight:800,marginBottom:14}}>{title}</div>
+
+        {!ready ? (
+          <div style={{display:"flex",justifyContent:"center",padding:"40px 0"}}><InkSplashLoader label="loading image" size={56}/></div>
+        ) : (
+          <>
+            <canvas
+              ref={canvasRef}
+              width={CANVAS_W} height={CANVAS_H}
+              style={{width:CANVAS_W,height:CANVAS_H,touchAction:"none",cursor:"grab",border:"1px solid var(--line-strong)",display:"block",margin:"0 auto 16px"}}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerLeave={onPointerUp}
+            />
+            <div style={{marginBottom:12}}>
+              <label style={{fontSize:10.5,color:"var(--paper-faint)",fontWeight:700,letterSpacing:"0.05em",textTransform:"uppercase",display:"block",marginBottom:6}}>Zoom</label>
+              <input type="range" min="1" max="3" step="0.01" value={zoom} onChange={e=>setZoom(parseFloat(e.target.value))} style={{width:"100%"}}/>
+            </div>
+            <div style={{marginBottom:14}}>
+              <label style={{fontSize:10.5,color:"var(--paper-faint)",fontWeight:700,letterSpacing:"0.05em",textTransform:"uppercase",display:"block",marginBottom:6}}>Fine rotate</label>
+              <input type="range" min="-45" max="45" step="1" value={fineRotate} onChange={e=>setFineRotate(parseFloat(e.target.value))} style={{width:"100%"}}/>
+            </div>
+            <div style={{display:"flex",gap:8,marginBottom:18}}>
+              <button className="btn btn-ghost btn-sm" onClick={()=>setRotate90(r=>(r+3)%4)} style={{flex:1}}>⟲ Rotate -90°</button>
+              <button className="btn btn-ghost btn-sm" onClick={()=>setRotate90(r=>(r+1)%4)} style={{flex:1}}>⟳ Rotate +90°</button>
+              <button className="btn btn-ghost btn-sm" onClick={()=>{setZoom(1);setRotate90(0);setFineRotate(0);setOffset({x:0,y:0});}}>Reset</button>
+            </div>
+          </>
+        )}
+
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+          <button className="btn btn-ghost" onClick={onCancel}>Cancel</button>
+          <button className="btn btn-primary" onClick={apply} disabled={!ready}>Apply</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================================
+   Admin — manage existing manhwas (edit / delete)
+   ========================================================================== */
+
+function AdminLibraryManager({library, refetchLibrary, toast}) {
+  const [search,setSearch] = useState("");
+  const [filterStatus,setFilterStatus] = useState("");
+  const [editingManga,setEditingManga] = useState(null);
+  const [deletingManga,setDeletingManga] = useState(null);
+
+  const filtered = useMemo(()=>{
+    const q = search.trim().toLowerCase();
+    return (library||[]).filter(m=>{
+      if (filterStatus && m.status !== filterStatus) return false;
+      if (!q) return true;
+      return m.title?.toLowerCase().includes(q) || m.author?.toLowerCase().includes(q);
+    });
+  },[library, search, filterStatus]);
+
+  return (
+    <div className="animate-fadeUp">
+      <div style={{display:"flex",gap:10,marginBottom:18,flexWrap:"wrap"}}>
+        <input className="input" placeholder="Search by title or author…" value={search} onChange={e=>setSearch(e.target.value)} style={{flex:"2 1 220px"}}/>
+        <select className="input" value={filterStatus} onChange={e=>setFilterStatus(e.target.value)} style={{flex:"1 1 140px"}}>
+          <option value="">Any Status</option>{STATUS.map(s=><option key={s}>{s}</option>)}
+        </select>
+        <div style={{display:"flex",alignItems:"center",fontSize:11.5,color:"var(--paper-faint)",padding:"0 4px"}}>
+          {filtered.length} of {library?.length||0} series
+        </div>
+      </div>
+
+      {!library ? null : library.length===0 ? (
+        <div style={{textAlign:"center",padding:"50px 0",color:"var(--paper-faint)",fontSize:13,border:"1px solid var(--line)"}}>
+          No series in the library yet — use the Upload New tab to add one.
+        </div>
+      ) : filtered.length===0 ? (
+        <div style={{textAlign:"center",padding:"50px 0",color:"var(--paper-faint)",fontSize:13,border:"1px solid var(--line)"}}>
+          No series match that search/filter.
+        </div>
+      ) : (
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {filtered.map(m=>(
+            <div key={m.id} style={{display:"flex",gap:14,alignItems:"center",border:"1px solid var(--line)",padding:12,borderRadius:"var(--radius)"}}>
+              <img src={m.cover} alt="" style={{width:48,height:72,objectFit:"cover",flexShrink:0,border:"1px solid var(--line-strong)"}}/>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontWeight:700,fontSize:14,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{m.title}</div>
+                <div style={{fontSize:11.5,color:"var(--paper-faint)",marginTop:2}}>{m.author||"Unknown author"} · {m.chapters?.length||0} chapters · {m.status}</div>
+              </div>
+              <button className="btn btn-ghost btn-sm" onClick={()=>setEditingManga(m)}>Edit</button>
+              <button className="btn btn-danger btn-sm" onClick={()=>setDeletingManga(m)}>Delete</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {editingManga && (
+        <EditManhwaModal manga={editingManga} toast={toast} refetchLibrary={refetchLibrary}
+          onClose={()=>setEditingManga(null)}/>
+      )}
+      {deletingManga && (
+        <DeleteManhwaModal manga={deletingManga} toast={toast} refetchLibrary={refetchLibrary}
+          onClose={()=>setDeletingManga(null)}/>
+      )}
+    </div>
+  );
+}
+
+function cloneChaptersForEdit(chapters) {
+  return (chapters||[]).map(ch => ({
+    id: ch.id, isNew: false, title: ch.title, number: ch.number,
+    pages: (ch.pages||[]).map(p => ({ id: p.id, image: p.image, isNew: false })),
+  }));
+}
+
+function EditManhwaModal({manga, onClose, toast, refetchLibrary}) {
+  const [tab,setTab] = useState("details");
+  const [form,setForm] = useState({
+    title: manga.title||"", author: manga.author||"", description: manga.description||"",
+    type: manga.type||TYPES[0], status: manga.status||STATUS[0], genres: manga.genres||[], cover: manga.cover||"",
+  });
+  const [chapters,setChapters] = useState(()=>cloneChaptersForEdit(manga.chapters));
+  const [deletedChapterIds,setDeletedChapterIds] = useState([]);
+  const [deletedPageIds,setDeletedPageIds] = useState([]);
+  const [openChapterIdx,setOpenChapterIdx] = useState(null);
+  const [newChapterTitle,setNewChapterTitle] = useState("");
+  const [cropSrc,setCropSrc] = useState(null);
+  const [saving,setSaving] = useState(false);
+  const [dragChIdx,setDragChIdx] = useState(null);
+  const fileInputRef = useRef();
+
+  const set = (k,v) => setForm(f=>({...f,[k]:v}));
+  const toggleGenre = g => set("genres", form.genres.includes(g) ? form.genres.filter(x=>x!==g) : [...form.genres,g]);
+
+  const pickCoverFile = async (fileList) => {
+    const [url] = await filesToDataUrls(fileList).catch(()=>[]);
+    if (url) setCropSrc(url); else toast("Could not read that file","error");
+  };
+
+  const addChapter = () => {
+    if (!newChapterTitle.trim()) { toast("Chapter needs a title","error"); return; }
+    setChapters(cs => [...cs, { id:`new-${Date.now()}`, isNew:true, title:newChapterTitle.trim(), number:cs.length+1, pages:[] }]);
+    setNewChapterTitle("");
+    setOpenChapterIdx(chapters.length);
+  };
+
+  const removeChapter = (idx) => {
+    const ch = chapters[idx];
+    if (!window.confirm(`Remove "${ch.title}"? This deletes its pages too.`)) return;
+    if (!ch.isNew) setDeletedChapterIds(ids=>[...ids, ch.id]);
+    setChapters(cs => cs.filter((_,i)=>i!==idx));
+    if (openChapterIdx===idx) setOpenChapterIdx(null);
+  };
+
+  const updateChapter = (idx, patch) => setChapters(cs => cs.map((c,i)=> i===idx ? {...c,...patch} : c));
+
+  const updateChapterPages = (idx, updater) => setChapters(cs => cs.map((c,i)=> i===idx ? {...c, pages: updater(c.pages)} : c));
+
+  const removePage = (chIdx, pageIdx) => {
+    const page = chapters[chIdx].pages[pageIdx];
+    if (!page.isNew) setDeletedPageIds(ids=>[...ids, page.id]);
+    updateChapterPages(chIdx, prev => prev.filter((_,i)=>i!==pageIdx));
+  };
+
+  const totalPages = chapters.reduce((s,c)=>s+c.pages.length,0);
+
+  const save = async () => {
+    if (!form.title.trim()) { toast("Title is required","error"); setTab("details"); return; }
+    setSaving(true);
+    try {
+      let coverUrl = form.cover;
+      if (coverUrl && coverUrl.startsWith("data:")) {
+        coverUrl = await uploadDataUrlToStorage(coverUrl, "cover");
+      }
+
+      const { error: seriesErr } = await supabase.from("series").update({
+        title: form.title, author: form.author, description: form.description,
+        type: form.type, status: form.status, genres: form.genres, cover_url: coverUrl || null,
+      }).eq("id", manga.id);
+      if (seriesErr) throw seriesErr;
+
+      if (deletedChapterIds.length) {
+        await supabase.from("pages").delete().in("chapter_id", deletedChapterIds);
+        try { await supabase.from("comments").delete().in("chapter_id", deletedChapterIds); } catch {}
+        const { error } = await supabase.from("chapters").delete().in("id", deletedChapterIds);
+        if (error) throw error;
+      }
+      if (deletedPageIds.length) {
+        const { error } = await supabase.from("pages").delete().in("id", deletedPageIds);
+        if (error) throw error;
+      }
+
+      for (let i = 0; i < chapters.length; i++) {
+        const ch = chapters[i];
+        let chapterId = ch.id;
+        if (ch.isNew) {
+          const { data: chRow, error } = await supabase.from("chapters")
+            .insert({ series_id: manga.id, number: i+1, title: ch.title }).select().single();
+          if (error) throw error;
+          chapterId = chRow.id;
+        } else {
+          const { error } = await supabase.from("chapters").update({ number: i+1, title: ch.title }).eq("id", ch.id);
+          if (error) throw error;
+        }
+
+        for (let p = 0; p < ch.pages.length; p++) {
+          const page = ch.pages[p];
+          if (page.isNew) {
+            const imageUrl = page.image.startsWith("data:") ? await uploadDataUrlToStorage(page.image, "page") : page.image;
+            const { error } = await supabase.from("pages").insert({ chapter_id: chapterId, image_url: imageUrl, page_order: p });
+            if (error) throw error;
+          } else {
+            const { error } = await supabase.from("pages").update({ page_order: p }).eq("id", page.id);
+            if (error) throw error;
+          }
+        }
+      }
+
+      toast("Series updated","success");
+      await refetchLibrary();
+      onClose();
+    } catch (err) {
+      toast(err.message || "Could not save changes","error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&!saving&&onClose()}>
+      <div className="modal" style={{maxWidth:680}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:18}}>
+          <div className="brush" style={{fontSize:17,fontWeight:800,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>Edit — {manga.title}</div>
+          <span className="seal-badge">● Admin</span>
+        </div>
+
+        <div style={{display:"flex",gap:0,marginBottom:20,border:"1px solid var(--line)"}}>
+          {[["details","Details & Cover"],["chapters",`Chapters (${chapters.length})`]].map(([id,label])=>(
+            <button key={id} onClick={()=>setTab(id)} style={{flex:1,padding:"9px 12px",fontSize:11,fontWeight:700,letterSpacing:"0.04em",textTransform:"uppercase",
+              color:tab===id?"var(--paper)":"var(--paper-faint)",
+              borderBottom:tab===id?"2px solid var(--paper)":"2px solid transparent",
+            }}>{label}</button>
+          ))}
+        </div>
+
+        {tab==="details" && (
+          <div style={{display:"flex",flexDirection:"column",gap:14}}>
+            <div style={{display:"flex",gap:16,alignItems:"flex-start"}}>
+              <div
+                onClick={()=>fileInputRef.current?.click()}
+                style={{width:96,aspectRatio:"2/3",flexShrink:0,cursor:"pointer",border:"1.5px solid var(--line-strong)",position:"relative",overflow:"hidden"}}
+              >
+                <input ref={fileInputRef} type="file" accept="image/*" style={{display:"none"}}
+                  onChange={e=>{pickCoverFile(e.target.files); e.target.value="";}}/>
+                {form.cover ? <img src={form.cover} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/> : (
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",fontSize:10,color:"var(--paper-faint)",textAlign:"center",padding:6}}>No cover</div>
+                )}
+              </div>
+              <div style={{flex:1}}>
+                <div className="brush" style={{fontSize:13,fontWeight:700,marginBottom:4}}>Cover Art</div>
+                <div style={{fontSize:11.5,color:"var(--paper-faint)",lineHeight:1.5,marginBottom:10}}>Click the thumbnail to replace it. You'll get a crop/zoom/rotate editor before it's applied.</div>
+                <button className="btn btn-ghost btn-sm" onClick={()=>fileInputRef.current?.click()}>Replace cover</button>
+              </div>
+            </div>
+
+            <div><label style={{fontSize:11,color:"var(--paper-faint)",fontWeight:700,letterSpacing:"0.05em",textTransform:"uppercase",display:"block",marginBottom:7}}>Title *</label><input className="input" value={form.title} onChange={e=>set("title",e.target.value)}/></div>
+            <div><label style={{fontSize:11,color:"var(--paper-faint)",fontWeight:700,letterSpacing:"0.05em",textTransform:"uppercase",display:"block",marginBottom:7}}>Author</label><input className="input" value={form.author} onChange={e=>set("author",e.target.value)}/></div>
+            <div><label style={{fontSize:11,color:"var(--paper-faint)",fontWeight:700,letterSpacing:"0.05em",textTransform:"uppercase",display:"block",marginBottom:7}}>Description</label><textarea className="input" rows={4} value={form.description} onChange={e=>set("description",e.target.value)} style={{resize:"vertical"}}/></div>
+            <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+              <div style={{flex:"1 1 140px"}}><label style={{fontSize:11,color:"var(--paper-faint)",fontWeight:700,letterSpacing:"0.05em",textTransform:"uppercase",display:"block",marginBottom:7}}>Type</label><select className="input" value={form.type} onChange={e=>set("type",e.target.value)}>{TYPES.map(t=><option key={t}>{t}</option>)}</select></div>
+              <div style={{flex:"1 1 140px"}}><label style={{fontSize:11,color:"var(--paper-faint)",fontWeight:700,letterSpacing:"0.05em",textTransform:"uppercase",display:"block",marginBottom:7}}>Status</label><select className="input" value={form.status} onChange={e=>set("status",e.target.value)}>{STATUS.map(s=><option key={s}>{s}</option>)}</select></div>
+            </div>
+            <div><label style={{fontSize:11,color:"var(--paper-faint)",fontWeight:700,letterSpacing:"0.05em",textTransform:"uppercase",display:"block",marginBottom:8}}>Genres</label><div style={{display:"flex",flexWrap:"wrap",gap:6}}>{GENRES.map(g=><span key={g} className={`tag action ${form.genres.includes(g)?"active":""}`} onClick={()=>toggleGenre(g)}>{g}</span>)}</div></div>
+          </div>
+        )}
+
+        {tab==="chapters" && (
+          <div>
+            <div style={{border:"1px solid var(--line)",padding:14,marginBottom:16}}>
+              <div className="brush" style={{fontWeight:700,marginBottom:10,fontSize:13}}>New Chapter</div>
+              <div style={{display:"flex",gap:8}}>
+                <input className="input" placeholder={`Chapter ${chapters.length+1} title`} value={newChapterTitle} onChange={e=>setNewChapterTitle(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addChapter()}/>
+                <button className="btn btn-primary" onClick={addChapter} style={{flexShrink:0}}>Add</button>
+              </div>
+            </div>
+
+            {chapters.length===0 && (
+              <div style={{textAlign:"center",padding:"24px 0",color:"var(--paper-faint)",fontSize:13,border:"1px solid var(--line)",marginBottom:16}}>No chapters yet.</div>
+            )}
+
+            {chapters.map((ch,ci)=>{
+              const isOpen = openChapterIdx===ci;
+              return (
+                <div key={ch.id}
+                  draggable
+                  onDragStart={()=>setDragChIdx(ci)}
+                  onDragOver={e=>e.preventDefault()}
+                  onDrop={()=>{ if(dragChIdx!==null && dragChIdx!==ci){ setChapters(cs=>{ const next=[...cs]; const [moved]=next.splice(dragChIdx,1); next.splice(ci,0,moved); return next; }); } setDragChIdx(null); }}
+                  style={{border:"1px solid var(--line)",marginBottom:10,opacity:dragChIdx===ci?0.4:1}}
+                >
+                  <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",cursor:"grab"}}>
+                    <span style={{color:"var(--paper-faint)",fontSize:13}}>⠿</span>
+                    <input className="input" style={{flex:"0 0 64px",padding:"7px 8px",fontSize:12}} type="number" value={ch.number} onChange={e=>updateChapter(ci,{number:parseInt(e.target.value)||1})}/>
+                    <input className="input" style={{flex:1,padding:"7px 10px",fontSize:13}} value={ch.title} onChange={e=>updateChapter(ci,{title:e.target.value})}/>
+                    <span style={{fontSize:11,color:"var(--paper-faint)",flexShrink:0}}>{ch.pages.length} pg</span>
+                    <button className="btn btn-ghost btn-sm" onClick={()=>setOpenChapterIdx(isOpen?null:ci)}>{isOpen?"Hide pages":"Pages"}</button>
+                    <button className="btn btn-danger btn-sm" onClick={()=>removeChapter(ci)}>Remove</button>
+                  </div>
+                  {isOpen && (
+                    <div style={{padding:"0 14px 16px"}}>
+                      <PageUploader
+                        pages={ch.pages}
+                        onAddPages={(urls)=>updateChapterPages(ci, prev=>[...prev, ...urls.map(url=>({id:`new-pg-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,image:url,isNew:true}))])}
+                        onRemovePage={(idx)=>removePage(ci, idx)}
+                        onReorder={(from,to)=>updateChapterPages(ci, prev=>{
+                          const next=[...prev]; const [moved]=next.splice(from,1); next.splice(to,0,moved);
+                          return next;
+                        })}
+                        toast={toast}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            <div style={{fontSize:11,color:"var(--paper-faint)"}}>{totalPages} pages total · drag a chapter row to reorder it.</div>
+          </div>
+        )}
+
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:22}}>
+          <button className="btn btn-ghost" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="btn btn-primary" onClick={save} disabled={saving}>{saving?"Saving…":"Save Changes"}</button>
+        </div>
+      </div>
+
+      {cropSrc && (
+        <ImageCropEditor src={cropSrc} aspect={2/3} title="Adjust cover"
+          onCancel={()=>setCropSrc(null)}
+          onApply={(dataUrl)=>{ set("cover", dataUrl); setCropSrc(null); }}/>
+      )}
+    </div>
+  );
+}
+
+function DeleteManhwaModal({manga, onClose, toast, refetchLibrary}) {
+  const [confirmText,setConfirmText] = useState("");
+  const [deleting,setDeleting] = useState(false);
+  const chapterCount = manga.chapters?.length || 0;
+  const ready = confirmText.trim() === "DELETE";
+
+  const doDelete = async () => {
+    if (!ready) return;
+    setDeleting(true);
+    try {
+      const chapterIds = (manga.chapters||[]).map(c=>c.id);
+      if (chapterIds.length) {
+        const { error: pErr } = await supabase.from("pages").delete().in("chapter_id", chapterIds);
+        if (pErr) throw pErr;
+        try { await supabase.from("comments").delete().in("chapter_id", chapterIds); } catch {}
+        const { error: cErr } = await supabase.from("chapters").delete().in("id", chapterIds);
+        if (cErr) throw cErr;
+      }
+      try { await supabase.from("bookmarks").delete().eq("series_id", manga.id); } catch {}
+      const { error: sErr } = await supabase.from("series").delete().eq("id", manga.id);
+      if (sErr) throw sErr;
+
+      toast(`"${manga.title}" deleted`,"success");
+      await refetchLibrary();
+      onClose();
+    } catch (err) {
+      toast(err.message || "Could not delete this series","error");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&!deleting&&onClose()}>
+      <div className="modal" style={{maxWidth:420}}>
+        <div className="brush" style={{fontSize:17,fontWeight:800,marginBottom:6,color:"var(--seal-bright)"}}>Delete this series?</div>
+        <div style={{fontSize:13,color:"var(--paper-dim)",marginBottom:18}}>Are you sure you want to permanently delete this manhwa? This cannot be undone.</div>
+
+        <div style={{display:"flex",gap:12,alignItems:"center",border:"1px solid var(--line)",padding:12,marginBottom:18}}>
+          <img src={manga.cover} alt="" style={{width:44,height:64,objectFit:"cover",flexShrink:0,border:"1px solid var(--line-strong)"}}/>
+          <div style={{minWidth:0}}>
+            <div style={{fontWeight:700,fontSize:14,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{manga.title}</div>
+            <div style={{fontSize:11.5,color:"var(--paper-faint)",marginTop:2}}>{chapterCount} chapter{chapterCount!==1?"s":""}</div>
+          </div>
+        </div>
+
+        <div style={{fontSize:11.5,color:"var(--paper-faint)",lineHeight:1.6,marginBottom:14}}>
+          This will remove the series, all of its chapters and pages, its comments, and any bookmarks pointing to it.
+        </div>
+
+        <label style={{fontSize:11,color:"var(--paper-faint)",fontWeight:700,letterSpacing:"0.05em",textTransform:"uppercase",display:"block",marginBottom:7}}>
+          Type DELETE to confirm
+        </label>
+        <input className="input" value={confirmText} onChange={e=>setConfirmText(e.target.value)} placeholder="DELETE" style={{marginBottom:18}}/>
+
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+          <button className="btn btn-ghost" onClick={onClose} disabled={deleting}>Cancel</button>
+          <button className="btn btn-danger" onClick={doDelete} disabled={!ready||deleting} style={{opacity:ready?1:0.5}}>{deleting?"Deleting…":"Delete Permanently"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProfilePage({user,bookmarks,toast,signOut,navigate}) {
   return (
     <div style={{maxWidth:700,margin:"0 auto",padding:"20px"}}>
       <div style={{display:"flex",gap:16,alignItems:"center",marginBottom:20,padding:"20px",border:"1px solid var(--line)",flexWrap:"wrap"}}>
@@ -2171,7 +2464,7 @@ function ProfilePage({user,bookmarks,toast,signOut,setView}) {
       </div>
 
       {user.isAdmin&&(
-        <button className="btn btn-primary" style={{width:"100%"}} onClick={()=>setView("admin")}>Open Admin Upload →</button>
+        <button className="btn btn-primary" style={{width:"100%"}} onClick={()=>navigate("/admin")}>Open Admin Upload →</button>
       )}
     </div>
   );
@@ -2181,17 +2474,86 @@ function ProfilePage({user,bookmarks,toast,signOut,setView}) {
    App shell
    ========================================================================== */
 
+// Route wrapper for /series/:slug — resolves the manga from the library by
+// slug so the page works on a hard refresh / shared link / new tab, not just
+// when arriving via an in-app click.
+function DetailRoute({library, libraryLoading, bookmarks, setBookmarks, toast, navigate, user}) {
+  const { slug } = useParams();
+  const manga = useMemo(()=>findBySlug(library, slug), [library, slug]);
+
+  if (libraryLoading && !manga) {
+    return <div style={{display:"flex",justifyContent:"center",padding:"100px 0"}}><InkSplashLoader label="loading series" size={72}/></div>;
+  }
+  if (!manga) {
+    return (
+      <div style={{textAlign:"center",padding:"80px 20px"}}>
+        <div className="brush" style={{fontSize:32,marginBottom:14}}>無</div>
+        <div className="brush" style={{fontSize:18,fontWeight:800,marginBottom:10}}>Series not found</div>
+        <button className="btn btn-primary" onClick={()=>navigate("/")}>← Back to Browse</button>
+      </div>
+    );
+  }
+  return <DetailPage manga={manga} setManga={()=>{}} bookmarks={bookmarks} setBookmarks={setBookmarks} toast={toast} navigate={navigate} user={user}/>;
+}
+
+// Route wrapper for /series/:slug/read/:chapterIdx (1-based in the URL,
+// converted to a 0-based array index for the chapters array).
+function ReaderRoute({library, libraryLoading, toast, navigate, onUpdateChapterComments, user}) {
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const match = location.pathname.match(/^\/series\/([^/]+)\/read\/(\d+)$/);
+  const slug = match?.[1];
+  const chapterIdx = match?.[2];
+  const manga = useMemo(()=>findBySlug(library, slug), [library, slug]);
+  const chapterNumber = parseInt(chapterIdx, 10) || 1;
+  const idx = manga ? manga.chapters.findIndex(c => c.number === chapterNumber) : -1;
+
+  console.log("ReaderRoute debug:", {
+    slug, chapterIdx, chapterNumber,
+    mangaFound: !!manga,
+    mangaTitle: manga?.title,
+    chapterCount: manga?.chapters?.length,
+    chapterNumbers: manga?.chapters?.map(c => c.number),
+    resolvedIdx: idx,
+  });
+
+  if (libraryLoading && !manga) {
+    return <FullscreenInkLoader/>;
+  }
+  if (!manga || idx === -1) {
+    return (
+      <div style={{textAlign:"center",padding:"80px 20px"}}>
+        <div className="brush" style={{fontSize:32,marginBottom:14}}>無</div>
+        <div className="brush" style={{fontSize:18,fontWeight:800,marginBottom:10}}>Chapter not found</div>
+        <button className="btn btn-primary" onClick={()=>navigate(manga?seriesPath(manga):"/")}>← Back</button>
+      </div>
+    );
+  }
+  return <ReaderPage manga={manga} chapterIdx={idx} openComments={searchParams.get("comments")==="1"}
+    toast={toast} navigate={navigate} onUpdateChapterComments={onUpdateChapterComments} user={user}/>;
+}
+
+const isReaderPath = (pathname) => /^\/series\/[^/]+\/read\/\d+$/.test(pathname);
+
 export default function App() {
+  return (
+    <BrowserRouter>
+      <AppShell/>
+    </BrowserRouter>
+  );
+}
+
+function AppShell() {
   const [library,setLibrary]=useState([]);
   const [libraryLoading,setLibraryLoading]=useState(true);
-  const [view,setView]=useState("home");
-  const [currentMangaId,setCurrentMangaId]=useState(null);
-  const [readerState,setReaderState]=useState(null);
+  const [musicLibrary,setMusicLibrary]=useState([]);
   const [user,setUser]=useState(null); // { id, username, isAdmin } — derived from Supabase auth + profiles
   const [bookmarks,setBookmarksState]=useState([]); // array of series ids the current user has bookmarked
   const [showAuth,setShowAuth]=useState(false);
   const [booting,setBooting]=useState(true);
   const {toasts,show:toast}=useToast();
+  const navigate = useNavigate();
+  const location = useLocation();
 
   // Given a Supabase auth user, load their profile row (username, role) and
   // shape it into the { id, username, isAdmin } object the rest of the app uses.
@@ -2304,6 +2666,18 @@ export default function App() {
 
   useEffect(() => { fetchLibrary(); }, [fetchLibrary]);
 
+  // Admin-managed background music: a flat list of { id, title, producer, url }
+  // tracks, toggleable on/off per-user via useMusicPlayer below.
+  const fetchMusic = useCallback(async () => {
+    const { data, error } = await supabase.from("music").select("id, title, producer, url").order("created_at", { ascending: false });
+    if (error) { return; }
+    setMusicLibrary(data || []);
+  }, []);
+
+  useEffect(() => { fetchMusic(); }, [fetchMusic]);
+
+  const { enabled: musicEnabled, toggle: toggleMusic, currentTrack: nowPlayingTrack, dismissCard: dismissNowPlaying } = useMusicPlayer(musicLibrary);
+
   useEffect(()=>{
     const style=document.createElement("style");
     style.textContent=GLOBAL_CSS;
@@ -2330,16 +2704,6 @@ export default function App() {
     };
   },[]);
 
-  const currentManga = useMemo(()=>library.find(m=>m.id===currentMangaId)||null, [library,currentMangaId]);
-
-  // Keep readerState's manga reference fresh against the library (so newly
-  // posted comments show up immediately without leaving the reader).
-  const liveReaderState = useMemo(()=>{
-    if (!readerState) return null;
-    const freshManga = library.find(m=>m.id===readerState.manga.id) || readerState.manga;
-    return {...readerState, manga: freshManga};
-  },[readerState, library]);
-
   // Posting/deleting a comment writes straight to Supabase, then refetches
   // the library so the new comment (and its quote thumbnail, if any) shows
   // up everywhere it's displayed — same as the old local-array replace did,
@@ -2358,32 +2722,35 @@ export default function App() {
     fetchLibrary();
   },[user, fetchLibrary]);
 
-  const setCurrentManga = (m) => setCurrentMangaId(m?.id ?? null);
-
   if (booting) {
     return <FullscreenInkLoader />;
   }
 
-  if(view==="reader"&&liveReaderState){
+  // The reader is a fullscreen overlay with its own header — render it on its
+  // own, without the surrounding nav/bottom-nav chrome, same as before.
+  if (isReaderPath(location.pathname)) {
     return <>
-      <ReaderPage readerState={liveReaderState} setReaderState={setReaderState} toast={toast} setView={setView} onUpdateChapterComments={updateChapterComments} user={user}/>
+      <ReaderRoute library={library} libraryLoading={libraryLoading} toast={toast} navigate={navigate}
+        onUpdateChapterComments={updateChapterComments} user={user}/>
+      <NowPlayingCard track={nowPlayingTrack} onClose={dismissNowPlaying}/>
       <ToastContainer toasts={toasts}/>
     </>;
   }
 
   const navItems=[
-    {id:"home",icon:"⌂",label:"Browse"},
-    {id:"profile",icon:"☷",label:"Profile"},
-    ...(user?.isAdmin?[{id:"admin",icon:"✒",label:"Admin"}]:[]),
+    {path:"/",icon:"⌂",label:"Browse"},
+    {path:"/profile",icon:"☷",label:"Profile"},
+    ...(user?.isAdmin?[{path:"/admin",icon:"✒",label:"Admin"}]:[]),
   ];
 
   return (
     <div style={{minHeight:"100vh"}}>
       <nav className="nav">
-        <img src={ASSET_LOGO_NAV} alt="InkVault" onClick={()=>setView("home")} style={{height:24,width:"auto",display:"block",filter:"invert(1) brightness(1.4)",cursor:"pointer"}}/>
+        <img src={ASSET_LOGO_NAV} alt="InkVault" onClick={()=>navigate("/")} style={{height:24,width:"auto",display:"block",filter:"invert(1) brightness(1.4)",cursor:"pointer"}}/>
         <div style={{flex:1}}/>
+        <MusicToggle enabled={musicEnabled} onToggle={toggleMusic}/>
         {user?(
-          <div className="avatar" style={{width:32,height:32,fontSize:11,cursor:"pointer",border:user.isAdmin?"1.5px solid var(--seal)":"1px solid var(--line-strong)"}} onClick={()=>setView("profile")}>
+          <div className="avatar" style={{width:32,height:32,fontSize:11,cursor:"pointer",border:user.isAdmin?"1.5px solid var(--seal)":"1px solid var(--line-strong)"}} onClick={()=>navigate("/profile")}>
             {user.username.slice(0,2).toUpperCase()}
           </div>
         ):(
@@ -2391,36 +2758,48 @@ export default function App() {
         )}
       </nav>
       <main className="main-content">
-        {view==="home"&&<HomePage library={library} libraryLoading={libraryLoading} bookmarks={bookmarks} setBookmarks={setBookmarks} toast={toast} setView={setView} setCurrentManga={setCurrentManga}/>}
-        {view==="detail"&&currentManga&&<DetailPage manga={currentManga} setManga={()=>{}} bookmarks={bookmarks} setBookmarks={setBookmarks} toast={toast} setView={setView} setReaderState={setReaderState} user={user}/>}
-        {view==="profile"&&(user?<ProfilePage user={user} bookmarks={bookmarks} toast={toast} signOut={signOut} setView={setView}/>:(
-          <div style={{textAlign:"center",padding:"80px 20px"}}>
-            <div className="brush" style={{fontSize:36,marginBottom:14}}>人</div>
-            <div className="brush" style={{fontSize:20,fontWeight:800,marginBottom:8}}>Not signed in</div>
-            <button className="btn btn-primary" onClick={()=>setShowAuth(true)}>Sign In / Register</button>
-          </div>
-        ))}
-        {view==="admin"&&(user?.isAdmin?<AdminPanel refetchLibrary={fetchLibrary} user={user} toast={toast}/>:(
-          <div style={{textAlign:"center",padding:"80px 20px"}}>
-            <div className="brush" style={{fontSize:36,marginBottom:14}}>鎖</div>
-            <div className="brush" style={{fontSize:18,fontWeight:800,marginBottom:10}}>Admin access required</div>
-            {user ? (
-              <button className="btn btn-seal" onClick={()=>setView("profile")}>Get admin access →</button>
-            ) : (
-              <button className="btn btn-primary" onClick={()=>setShowAuth(true)}>Sign In</button>
-            )}
-          </div>
-        ))}
+        <Routes>
+          <Route path="/" element={
+            <HomePage library={library} libraryLoading={libraryLoading} bookmarks={bookmarks} setBookmarks={setBookmarks} toast={toast} navigate={navigate}/>
+          }/>
+          <Route path="/series/:slug" element={
+            <DetailRoute library={library} libraryLoading={libraryLoading} bookmarks={bookmarks} setBookmarks={setBookmarks} toast={toast} navigate={navigate} user={user}/>
+          }/>
+          <Route path="/profile" element={
+            user?<ProfilePage user={user} bookmarks={bookmarks} toast={toast} signOut={signOut} navigate={navigate}/>:(
+              <div style={{textAlign:"center",padding:"80px 20px"}}>
+                <div className="brush" style={{fontSize:36,marginBottom:14}}>人</div>
+                <div className="brush" style={{fontSize:20,fontWeight:800,marginBottom:8}}>Not signed in</div>
+                <button className="btn btn-primary" onClick={()=>setShowAuth(true)}>Sign In / Register</button>
+              </div>
+            )
+          }/>
+          <Route path="/admin" element={
+            user?.isAdmin?<AdminPanel library={library} refetchLibrary={fetchLibrary} user={user} toast={toast} musicLibrary={musicLibrary} refetchMusic={fetchMusic}/>:(
+              <div style={{textAlign:"center",padding:"80px 20px"}}>
+                <div className="brush" style={{fontSize:36,marginBottom:14}}>鎖</div>
+                <div className="brush" style={{fontSize:18,fontWeight:800,marginBottom:10}}>Admin access required</div>
+                {user ? (
+                  <button className="btn btn-seal" onClick={()=>navigate("/profile")}>Get admin access →</button>
+                ) : (
+                  <button className="btn btn-primary" onClick={()=>setShowAuth(true)}>Sign In</button>
+                )}
+              </div>
+            )
+          }/>
+          <Route path="*" element={<Navigate to="/" replace/>}/>
+        </Routes>
       </main>
       <div className="bottom-nav">
         {navItems.map(n=>(
-          <button key={n.id} className={`bottom-nav-item ${view===n.id?"active":""}`} onClick={()=>setView(n.id)}>
+          <button key={n.path} className={`bottom-nav-item ${location.pathname===n.path?"active":""}`} onClick={()=>navigate(n.path)}>
             <span className="bottom-nav-icon">{n.icon}</span>{n.label}
           </button>
         ))}
         {!user&&<button className="bottom-nav-item" onClick={()=>setShowAuth(true)}><span className="bottom-nav-icon">⚿</span>Sign In</button>}
       </div>
       {showAuth&&<AuthModal toast={toast} onClose={()=>setShowAuth(false)} onLogin={async (authUser)=>{await loadProfile(authUser);toast(`Welcome back`, "success");}}/>}
+      <NowPlayingCard track={nowPlayingTrack} onClose={dismissNowPlaying}/>
       <ToastContainer toasts={toasts}/>
     </div>
   );

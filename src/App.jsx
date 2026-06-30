@@ -266,6 +266,66 @@ const GLOBAL_CSS = `
 
   /* ---- ink splash arrival overlay (plays over a jumped-to page) ---- */
   .splash-arrival { position: absolute; inset: 0; pointer-events: none; display: flex; align-items: center; justify-content: center; z-index: 10; overflow: hidden; }
+
+  /* ---- music toggle + now-playing liquid card ---- */
+  @keyframes liquidMorph {
+    0%   { border-radius: 42% 58% 63% 37% / 41% 44% 56% 59%; }
+    25%  { border-radius: 58% 42% 38% 62% / 60% 38% 62% 40%; }
+    50%  { border-radius: 50% 50% 33% 67% / 55% 27% 73% 45%; }
+    75%  { border-radius: 36% 64% 64% 36% / 36% 63% 37% 64%; }
+    100% { border-radius: 42% 58% 63% 37% / 41% 44% 56% 59%; }
+  }
+  @keyframes musicCardIn { 0% { opacity: 0; transform: translateY(10px) scale(0.92); } 100% { opacity: 1; transform: translateY(0) scale(1); } }
+  @keyframes musicCardOut { 0% { opacity: 1; transform: translateY(0) scale(1); } 100% { opacity: 0; transform: translateY(10px) scale(0.92); } }
+  @keyframes liquidPulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.12); } }
+
+  .music-toggle { position: relative; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; border: 1px solid var(--line-strong); background: var(--ink-raised); color: var(--paper-dim); transition: border-color 0.2s, color 0.2s, background 0.2s; flex-shrink: 0; }
+  .music-toggle:hover { border-color: var(--paper); color: var(--paper); }
+  .music-toggle.on { color: var(--paper); border-color: var(--paper); background: var(--wash); }
+  .music-toggle .music-bars { display: flex; align-items: flex-end; gap: 2px; height: 12px; }
+  .music-toggle .music-bars span { width: 2px; background: currentColor; border-radius: 1px; opacity: 0.85; }
+  .music-toggle.on .music-bars span { animation: musicBar 0.9s ease-in-out infinite; }
+  .music-toggle .music-bars span:nth-child(1) { height: 5px; animation-delay: 0s; }
+  .music-toggle .music-bars span:nth-child(2) { height: 11px; animation-delay: 0.15s; }
+  .music-toggle .music-bars span:nth-child(3) { height: 7px; animation-delay: 0.3s; }
+  @keyframes musicBar { 0%,100% { transform: scaleY(0.4); } 50% { transform: scaleY(1); } }
+
+  .music-now-card {
+    position: fixed;
+    --mx: 30%; --my: 30%;
+    left: 16px; bottom: 84px; z-index: 90;
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 16px 10px 10px; max-width: 280px;
+    background:
+      radial-gradient(circle at var(--mx) var(--my), rgba(230,74,63,0.45), transparent 55%),
+      linear-gradient(135deg, rgba(28,28,28,0.94), rgba(10,10,10,0.97));
+    border: 1px solid var(--line-strong); box-shadow: var(--shadow-3);
+    backdrop-filter: blur(14px) saturate(140%);
+    animation: musicCardIn 0.45s var(--ease), liquidMorph 9s ease-in-out infinite;
+    overflow: hidden;
+    will-change: background;
+  }
+  .music-now-card::before {
+    content: ''; position: absolute; inset: 0; pointer-events: none; mix-blend-mode: screen; opacity: 0.55;
+    background: radial-gradient(circle at var(--mx) var(--my), rgba(244,242,237,0.16), transparent 40%);
+    transform: translate3d(0,0,0);
+  }
+  .music-now-card.leaving { animation: musicCardOut 0.4s var(--ease) forwards; }
+  @media (min-width: 768px) { .music-now-card { bottom: 24px; left: 24px; } }
+  .music-now-blob {
+    width: 38px; height: 38px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, var(--seal), var(--seal-bright));
+    color: var(--paper); font-size: 14px;
+    animation: liquidMorph 6s ease-in-out infinite, liquidPulse 2.4s ease-in-out infinite;
+  }
+  .music-now-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .music-now-title { font-size: 12.5px; font-weight: 800; color: var(--paper); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .music-now-producer { font-size: 10.5px; font-weight: 600; color: var(--paper-dim); letter-spacing: 0.03em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .music-now-close { margin-left: auto; flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--paper-faint); cursor: pointer; transition: color 0.18s, background 0.18s; }
+  .music-now-close:hover { color: var(--paper); background: var(--wash); }
+
+  .music-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+  .music-row-blob { width: 30px; height: 30px; flex-shrink: 0; background: linear-gradient(135deg, var(--seal), var(--seal-bright)); animation: liquidMorph 7s ease-in-out infinite; display: flex; align-items: center; justify-content: center; color: var(--paper); font-size: 11px; }
 `;
 
 /* ============================================================================
@@ -478,9 +538,200 @@ async function uploadDataUrlToStorage(dataUrl, pathHint) {
   return data.publicUrl;
 }
 
+/* Uploads a raw audio File to the `inkvault-music` Storage bucket and
+   returns its public URL. Used by the admin Music panel. */
+async function uploadAudioToStorage(file) {
+  const ext = (file.name.split(".").pop() || "mp3").toLowerCase();
+  const path = `track-${Date.now()}-${Math.random().toString(36).slice(2,8)}.${ext}`;
+  const { error } = await supabase.storage.from("inkvault-music").upload(path, file, { contentType: file.type || "audio/mpeg" });
+  if (error) throw error;
+  const { data } = supabase.storage.from("inkvault-music").getPublicUrl(path);
+  return data.publicUrl;
+}
+
 /* ============================================================================
-   Home
+   Music — admin-managed background tracks, user-toggleable playback
    ========================================================================== */
+
+const MUSIC_PREF_KEY = "inkvault-music-enabled";
+
+function MusicToggle({ enabled, onToggle }) {
+  return (
+    <div className={`music-toggle ${enabled?"on":""}`} title={enabled?"Music on":"Music off"} onClick={onToggle}>
+      <div className="music-bars"><span/><span/><span/></div>
+    </div>
+  );
+}
+
+function NowPlayingCard({ track, onClose }) {
+  const [leaving, setLeaving] = useState(false);
+  const cardRef = useRef(null);
+  const rafRef = useRef(null);
+  const lastEvent = useRef(null);
+
+  // Cursor-reactive "ink" gradient: position is written straight to the
+  // element's style via a CSS custom property, throttled to one update per
+  // animation frame and skipped entirely while the card isn't hovered —
+  // no React re-renders, no layout thrash, negligible CPU cost.
+  const scheduleUpdate = useCallback(() => {
+    if (rafRef.current) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      const el = cardRef.current;
+      const e = lastEvent.current;
+      if (!el || !e) return;
+      const rect = el.getBoundingClientRect();
+      const x = ((e.clientX - rect.left) / rect.width) * 100;
+      const y = ((e.clientY - rect.top) / rect.height) * 100;
+      el.style.setProperty("--mx", `${x.toFixed(1)}%`);
+      el.style.setProperty("--my", `${y.toFixed(1)}%`);
+    });
+  }, []);
+
+  const handleMouseMove = useCallback((e) => {
+    lastEvent.current = e;
+    scheduleUpdate();
+  }, [scheduleUpdate]);
+
+  useEffect(() => () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); }, []);
+
+  if (!track) return null;
+  const close = () => {
+    setLeaving(true);
+    setTimeout(onClose, 380);
+  };
+  return (
+    <div ref={cardRef} className={`music-now-card ${leaving?"leaving":""}`} onMouseMove={handleMouseMove}>
+      <div className="music-now-blob">♪</div>
+      <div className="music-now-info">
+        <div className="music-now-title">{track.title}</div>
+        <div className="music-now-producer">prod. {track.producer}</div>
+      </div>
+      <div className="music-now-close" onClick={close}>✕</div>
+    </div>
+  );
+}
+
+/* Owns the <audio> element, the on/off toggle (persisted to localStorage),
+   and the brief "now playing" liquid card that surfaces whenever a track
+   starts. Renders nothing visible itself besides the card — the toggle
+   button is rendered separately in the nav so it can sit next to the avatar. */
+function useMusicPlayer(musicLibrary) {
+  const [enabled, setEnabled] = useState(() => {
+    try { return localStorage.getItem(MUSIC_PREF_KEY) === "1"; } catch { return false; }
+  });
+  const [trackIdx, setTrackIdx] = useState(0);
+  const [showCard, setShowCard] = useState(false);
+  const audioRef = useRef(null);
+  const cardTimer = useRef(null);
+
+  useEffect(() => {
+    try { localStorage.setItem(MUSIC_PREF_KEY, enabled ? "1" : "0"); } catch {}
+  }, [enabled]);
+
+  useEffect(() => {
+    if (!audioRef.current) audioRef.current = new Audio();
+    const audio = audioRef.current;
+    audio.volume = 0.55;
+    if (!enabled || musicLibrary.length === 0) {
+      audio.pause();
+      return;
+    }
+    const track = musicLibrary[trackIdx % musicLibrary.length];
+    if (!track) return;
+    if (audio.src !== track.url) audio.src = track.url;
+    audio.play().catch(() => {});
+    setShowCard(true);
+    clearTimeout(cardTimer.current);
+    cardTimer.current = setTimeout(() => setShowCard(false), 6000);
+
+    const onEnded = () => setTrackIdx(i => (i + 1) % musicLibrary.length);
+    audio.addEventListener("ended", onEnded);
+    return () => audio.removeEventListener("ended", onEnded);
+  }, [enabled, trackIdx, musicLibrary]);
+
+  const toggle = useCallback(() => {
+    setEnabled(e => {
+      const next = !e;
+      if (!next && audioRef.current) audioRef.current.pause();
+      return next;
+    });
+  }, []);
+
+  const currentTrack = enabled ? musicLibrary[trackIdx % (musicLibrary.length || 1)] : null;
+
+  return { enabled, toggle, currentTrack: showCard ? currentTrack : null, dismissCard: () => setShowCard(false) };
+}
+
+/* Admin sub-panel: upload new tracks (name + producer + audio file) and
+   remove existing ones. Lives alongside "Manage Library" / "Upload New". */
+function AdminMusicManager({ musicLibrary, refetchMusic, toast }) {
+  const [title, setTitle] = useState("");
+  const [producer, setProducer] = useState("");
+  const [file, setFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+
+  const handleUpload = async () => {
+    if (!title.trim() || !producer.trim() || !file) { toast("Add a title, producer, and audio file","warn"); return; }
+    setUploading(true);
+    try {
+      const url = await uploadAudioToStorage(file);
+      const { error } = await supabase.from("music").insert({ title: title.trim(), producer: producer.trim(), url });
+      if (error) throw error;
+      toast("Track added","success");
+      setTitle(""); setProducer(""); setFile(null);
+      refetchMusic();
+    } catch (e) {
+      toast(e.message || "Upload failed","error");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleRemove = async (track) => {
+    try {
+      await supabase.from("music").delete().eq("id", track.id);
+      toast("Track removed","success");
+      refetchMusic();
+    } catch (e) {
+      toast(e.message || "Could not remove track","error");
+    }
+  };
+
+  return (
+    <div>
+      <div className="card" style={{padding:20,marginBottom:24}}>
+        <div className="brush" style={{fontSize:15,fontWeight:800,marginBottom:14}}>Add a track</div>
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          <input className="input" placeholder="Song title" value={title} onChange={e=>setTitle(e.target.value)}/>
+          <input className="input" placeholder="Producer's name" value={producer} onChange={e=>setProducer(e.target.value)}/>
+          <label className="dropzone" style={{padding:18,cursor:"pointer"}}>
+            <input type="file" accept="audio/*" style={{display:"none"}} onChange={e=>setFile(e.target.files?.[0]||null)}/>
+            <div style={{fontSize:12,fontWeight:700,color:"var(--paper-dim)"}}>{file ? file.name : "Click to choose an audio file"}</div>
+          </label>
+          <button className="btn btn-primary" disabled={uploading} onClick={handleUpload} style={{alignSelf:"flex-start"}}>
+            {uploading ? "Uploading…" : "Add music"}
+          </button>
+        </div>
+      </div>
+
+      <div className="brush" style={{fontSize:15,fontWeight:800,marginBottom:6}}>Library ({musicLibrary.length})</div>
+      {musicLibrary.length===0 ? (
+        <div style={{color:"var(--paper-faint)",fontSize:13,padding:"12px 0"}}>No tracks uploaded yet.</div>
+      ) : musicLibrary.map(track=>(
+        <div key={track.id} className="music-row">
+          <div className="music-row-blob">♪</div>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:13,fontWeight:700,color:"var(--paper)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{track.title}</div>
+            <div style={{fontSize:11,color:"var(--paper-dim)"}}>prod. {track.producer}</div>
+          </div>
+          <button className="btn btn-danger btn-sm" onClick={()=>handleRemove(track)}>Remove</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 
 function HomePage({library,libraryLoading,bookmarks,setBookmarks,toast,navigate}) {
   const [search,setSearch]=useState("");
@@ -1379,23 +1630,23 @@ function PageUploader({pages, onAddPages, onRemovePage, onReorder, toast}) {
   );
 }
 
-function AdminPanel({library,refetchLibrary,user,toast}) {
+function AdminPanel({library,refetchLibrary,user,toast,musicLibrary,refetchMusic}) {
   const [adminTab,setAdminTab]=useState("manage");
 
   return (
     <div style={{maxWidth:980,margin:"0 auto",padding:"20px"}}>
-      <div style={{display:"flex",gap:0,marginBottom:24,border:"1px solid var(--line)",maxWidth:360}}>
-        {[["manage","Manage Library"],["upload","Upload New"]].map(([id,label])=>(
+      <div style={{display:"flex",gap:0,marginBottom:24,border:"1px solid var(--line)",maxWidth:480}}>
+        {[["manage","Manage Library"],["upload","Upload New"],["music","Music"]].map(([id,label],i)=>(
           <button key={id} onClick={()=>setAdminTab(id)} style={{flex:1,padding:"10px 12px",fontSize:11.5,fontWeight:700,letterSpacing:"0.04em",textTransform:"uppercase",
             color:adminTab===id?"var(--paper)":"var(--paper-faint)",
             borderBottom:adminTab===id?"2px solid var(--paper)":"2px solid transparent",
-            borderRight:id==="manage"?"1px solid var(--line)":"none",
+            borderRight:i<2?"1px solid var(--line)":"none",
           }}>{label}</button>
         ))}
       </div>
-      {adminTab==="manage"
-        ? <AdminLibraryManager library={library} refetchLibrary={refetchLibrary} toast={toast}/>
-        : <AdminUploadWizard refetchLibrary={refetchLibrary} user={user} toast={toast}/>}
+      {adminTab==="manage" && <AdminLibraryManager library={library} refetchLibrary={refetchLibrary} toast={toast}/>}
+      {adminTab==="upload" && <AdminUploadWizard refetchLibrary={refetchLibrary} user={user} toast={toast}/>}
+      {adminTab==="music" && <AdminMusicManager musicLibrary={musicLibrary} refetchMusic={refetchMusic} toast={toast}/>}
     </div>
   );
 }
@@ -2295,6 +2546,7 @@ export default function App() {
 function AppShell() {
   const [library,setLibrary]=useState([]);
   const [libraryLoading,setLibraryLoading]=useState(true);
+  const [musicLibrary,setMusicLibrary]=useState([]);
   const [user,setUser]=useState(null); // { id, username, isAdmin } — derived from Supabase auth + profiles
   const [bookmarks,setBookmarksState]=useState([]); // array of series ids the current user has bookmarked
   const [showAuth,setShowAuth]=useState(false);
@@ -2414,6 +2666,18 @@ function AppShell() {
 
   useEffect(() => { fetchLibrary(); }, [fetchLibrary]);
 
+  // Admin-managed background music: a flat list of { id, title, producer, url }
+  // tracks, toggleable on/off per-user via useMusicPlayer below.
+  const fetchMusic = useCallback(async () => {
+    const { data, error } = await supabase.from("music").select("id, title, producer, url").order("created_at", { ascending: false });
+    if (error) { return; }
+    setMusicLibrary(data || []);
+  }, []);
+
+  useEffect(() => { fetchMusic(); }, [fetchMusic]);
+
+  const { enabled: musicEnabled, toggle: toggleMusic, currentTrack: nowPlayingTrack, dismissCard: dismissNowPlaying } = useMusicPlayer(musicLibrary);
+
   useEffect(()=>{
     const style=document.createElement("style");
     style.textContent=GLOBAL_CSS;
@@ -2468,6 +2732,7 @@ function AppShell() {
     return <>
       <ReaderRoute library={library} libraryLoading={libraryLoading} toast={toast} navigate={navigate}
         onUpdateChapterComments={updateChapterComments} user={user}/>
+      <NowPlayingCard track={nowPlayingTrack} onClose={dismissNowPlaying}/>
       <ToastContainer toasts={toasts}/>
     </>;
   }
@@ -2483,6 +2748,7 @@ function AppShell() {
       <nav className="nav">
         <img src={ASSET_LOGO_NAV} alt="InkVault" onClick={()=>navigate("/")} style={{height:24,width:"auto",display:"block",filter:"invert(1) brightness(1.4)",cursor:"pointer"}}/>
         <div style={{flex:1}}/>
+        <MusicToggle enabled={musicEnabled} onToggle={toggleMusic}/>
         {user?(
           <div className="avatar" style={{width:32,height:32,fontSize:11,cursor:"pointer",border:user.isAdmin?"1.5px solid var(--seal)":"1px solid var(--line-strong)"}} onClick={()=>navigate("/profile")}>
             {user.username.slice(0,2).toUpperCase()}
@@ -2509,7 +2775,7 @@ function AppShell() {
             )
           }/>
           <Route path="/admin" element={
-            user?.isAdmin?<AdminPanel library={library} refetchLibrary={fetchLibrary} user={user} toast={toast}/>:(
+            user?.isAdmin?<AdminPanel library={library} refetchLibrary={fetchLibrary} user={user} toast={toast} musicLibrary={musicLibrary} refetchMusic={fetchMusic}/>:(
               <div style={{textAlign:"center",padding:"80px 20px"}}>
                 <div className="brush" style={{fontSize:36,marginBottom:14}}>鎖</div>
                 <div className="brush" style={{fontSize:18,fontWeight:800,marginBottom:10}}>Admin access required</div>
@@ -2533,6 +2799,7 @@ function AppShell() {
         {!user&&<button className="bottom-nav-item" onClick={()=>setShowAuth(true)}><span className="bottom-nav-icon">⚿</span>Sign In</button>}
       </div>
       {showAuth&&<AuthModal toast={toast} onClose={()=>setShowAuth(false)} onLogin={async (authUser)=>{await loadProfile(authUser);toast(`Welcome back`, "success");}}/>}
+      <NowPlayingCard track={nowPlayingTrack} onClose={dismissNowPlaying}/>
       <ToastContainer toasts={toasts}/>
     </div>
   );
