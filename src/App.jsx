@@ -300,8 +300,8 @@ const GLOBAL_CSS = `
     position: fixed;
     --mx: 30%; --my: 30%;
     left: 16px; bottom: 84px; z-index: 90;
-    display: flex; align-items: center; gap: 12px;
-    padding: 10px 16px 10px 10px; max-width: 280px;
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px 10px 10px; max-width: 320px;
     background:
       radial-gradient(circle at var(--mx) var(--my), rgba(230,74,63,0.45), transparent 55%),
       linear-gradient(135deg, rgba(28,28,28,0.94), rgba(10,10,10,0.97));
@@ -327,6 +327,9 @@ const GLOBAL_CSS = `
   .music-now-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .music-now-title { font-size: 12.5px; font-weight: 800; color: var(--paper); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .music-now-producer { font-size: 10.5px; font-weight: 600; color: var(--paper-dim); letter-spacing: 0.03em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .music-now-controls { display: flex; align-items: center; gap: 4px; flex-shrink: 0; margin-left: 4px; }
+  .music-now-btn { width: 22px; height: 22px; border-radius: 50%; border: none; background: transparent; color: var(--paper-dim); font-size: 11px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: color 0.18s, background 0.18s; }
+  .music-now-btn:hover { color: var(--paper); background: var(--wash); }
   .music-now-close { margin-left: auto; flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--paper-faint); cursor: pointer; transition: color 0.18s, background 0.18s; }
   .music-now-close:hover { color: var(--paper); background: var(--wash); }
 
@@ -480,6 +483,57 @@ function useLocalStorage(key, initial) {
   return [val, set];
 }
 
+/* Standard dismiss behavior for any modal/drawer/popover: Escape key closes
+   it, and — crucially for mobile — so does the device's physical/gesture
+   back button. We do this by pushing a throwaway history entry the moment
+   the surface opens, then listening for popstate; a back-press lands on
+   that entry and we treat it as "close" instead of letting the router
+   navigate away underneath the open modal. If the surface gets closed some
+   other way (✕ button, outside click, Escape) we pop that same entry off
+   ourselves so a later back-press doesn't land on a dead state and require
+   a second press to actually go anywhere. */
+function useDismissable(active, onClose) {
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const pushedRef = useRef(false);
+
+  useEffect(() => {
+    if (!active) return;
+    window.history.pushState({ __dismissable: true }, "");
+    pushedRef.current = true;
+
+    const handlePop = () => { pushedRef.current = false; onCloseRef.current(); };
+    const handleKey = (e) => { if (e.key === "Escape") onCloseRef.current(); };
+    window.addEventListener("popstate", handlePop);
+    window.addEventListener("keydown", handleKey);
+
+    return () => {
+      window.removeEventListener("popstate", handlePop);
+      window.removeEventListener("keydown", handleKey);
+      if (pushedRef.current) { pushedRef.current = false; window.history.back(); }
+    };
+  }, [active]);
+}
+
+/* Closes the surface when a click/tap lands outside `ref`'s element — the
+   "tap empty space to close" pattern, for floating popovers (settings
+   panel, GIF/emoji pickers, mention dropdowns) that don't have their own
+   full-screen backdrop to catch the click. */
+function useClickOutside(ref, active, onClose) {
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  useEffect(() => {
+    if (!active) return;
+    const handle = (e) => { if (ref.current && !ref.current.contains(e.target)) onCloseRef.current(); };
+    document.addEventListener("mousedown", handle, true);
+    document.addEventListener("touchstart", handle, true);
+    return () => {
+      document.removeEventListener("mousedown", handle, true);
+      document.removeEventListener("touchstart", handle, true);
+    };
+  }, [active]);
+}
+
 function LazyImg({src, alt, className, style}) {
   const ref = useRef();
   const [loaded, setLoaded] = useState(false);
@@ -512,6 +566,7 @@ function Stars({value, onChange, readOnly}) {
 
 function ContextMenu({x,y,items,onClose}) {
   useEffect(()=>{const h=()=>onClose();window.addEventListener("click",h,true);return()=>window.removeEventListener("click",h,true);},[onClose]);
+  useEffect(()=>{const h=(e)=>{if(e.key==="Escape")onClose();};window.addEventListener("keydown",h);return()=>window.removeEventListener("keydown",h);},[onClose]);
   return (
     <div className="ctx-menu" style={{left:Math.min(x,window.innerWidth-180),top:Math.min(y,window.innerHeight-200)}}>
       {items.map((item,i)=><button key={i} className={`ctx-item ${item.danger?"danger":""}`} onClick={()=>{item.action();onClose();}}>{item.icon} {item.label}</button>)}
@@ -569,7 +624,7 @@ function MusicToggle({ enabled, onToggle }) {
   );
 }
 
-function NowPlayingCard({ track, onClose }) {
+function NowPlayingCard({ track, trackNum, trackCount, onClose, onNext, onPrev, onHold, onRelease }) {
   const [leaving, setLeaving] = useState(false);
   const cardRef = useRef(null);
   const rafRef = useRef(null);
@@ -607,12 +662,18 @@ function NowPlayingCard({ track, onClose }) {
     setTimeout(onClose, 380);
   };
   return (
-    <div ref={cardRef} className={`music-now-card ${leaving?"leaving":""}`} onMouseMove={handleMouseMove}>
+    <div ref={cardRef} className={`music-now-card ${leaving?"leaving":""}`} onMouseMove={handleMouseMove} onMouseEnter={onHold} onMouseLeave={onRelease}>
       <div className="music-now-blob">♪</div>
       <div className="music-now-info">
         <div className="music-now-title">{track.title}</div>
-        <div className="music-now-producer">prod. {track.producer}</div>
+        <div className="music-now-producer">prod. {track.producer}{trackCount>1?` · ${trackNum}/${trackCount}`:""}</div>
       </div>
+      {trackCount>1 && (
+        <div className="music-now-controls">
+          <button className="music-now-btn" onClick={(e)=>{e.stopPropagation();onPrev();}} title="Previous track" aria-label="Previous track">⏮</button>
+          <button className="music-now-btn" onClick={(e)=>{e.stopPropagation();onNext();}} title="Next track" aria-label="Next track">⏭</button>
+        </div>
+      )}
       <div className="music-now-close" onClick={close}>✕</div>
     </div>
   );
@@ -664,9 +725,34 @@ function useMusicPlayer(musicLibrary) {
     });
   }, []);
 
+  // Manual track switching — picking a new index re-runs the effect above,
+  // which loads + plays it and re-surfaces the "now playing" card.
+  const next = useCallback(() => {
+    if (!musicLibrary.length) return;
+    setTrackIdx(i => (i + 1) % musicLibrary.length);
+  }, [musicLibrary.length]);
+
+  const prev = useCallback(() => {
+    if (!musicLibrary.length) return;
+    setTrackIdx(i => (i - 1 + musicLibrary.length) % musicLibrary.length);
+  }, [musicLibrary.length]);
+
+  // While the user is hovering/interacting with the card (e.g. about to
+  // tap next/prev), suspend the auto-hide timer so it doesn't vanish
+  // mid-click; resume with a shorter delay once they move away.
+  const holdCard = useCallback(() => clearTimeout(cardTimer.current), []);
+  const releaseCard = useCallback(() => {
+    clearTimeout(cardTimer.current);
+    cardTimer.current = setTimeout(() => setShowCard(false), 2500);
+  }, []);
+
   const currentTrack = enabled ? musicLibrary[trackIdx % (musicLibrary.length || 1)] : null;
 
-  return { enabled, toggle, currentTrack: showCard ? currentTrack : null, dismissCard: () => setShowCard(false) };
+  return {
+    enabled, toggle, currentTrack: showCard ? currentTrack : null,
+    trackNum: (trackIdx % (musicLibrary.length || 1)) + 1, trackCount: musicLibrary.length,
+    dismissCard: () => setShowCard(false), next, prev, holdCard, releaseCard,
+  };
 }
 
 /* Admin sub-panel: upload new tracks (name + producer + audio file) and
@@ -973,8 +1059,13 @@ function ChapterComments({chapter, mangaId, mangaTitle, onUpdateComments, user, 
   const [mentionQuery,setMentionQuery]=useState("");
   const fileInputRef=useRef(null);
   const textareaRef=useRef(null);
+  const mentionWrapRef=useRef(null);
+  const gifInputRef=useRef(null);
   const comments = chapter.comments || [];
   const friendList = friends || [];
+  useClickOutside(mentionWrapRef, showMentions, ()=>setShowMentions(false));
+  useClickOutside(gifInputRef, showGifInput, ()=>setShowGifInput(false));
+
 
   const pickImage = async (fileList) => {
     const [url] = await filesToDataUrls(fileList).catch(()=>[]);
@@ -1056,7 +1147,7 @@ function ChapterComments({chapter, mangaId, mangaTitle, onUpdateComments, user, 
       )}
       {user ? (
         <div style={{marginBottom:20}}>
-          <div style={{position:"relative"}}>
+          <div ref={mentionWrapRef} style={{position:"relative"}}>
             <textarea ref={textareaRef} className="input" rows={3} placeholder={pendingQuote ? "Add a comment about this page… (type @ to tag a friend)" : "Share your thoughts on this chapter… (type @ to tag a friend)"} value={text} onChange={handleTextChange} style={{resize:"vertical",marginBottom:8}}/>
             {showMentions && mentionMatches.length>0 && (
               <div style={{position:"absolute",top:"100%",left:0,zIndex:20,width:200,background:"var(--ink-soft)",border:"1px solid var(--line-strong)",borderRadius:"var(--radius)",boxShadow:"var(--shadow-2)",marginTop:-4}}>
@@ -1077,7 +1168,7 @@ function ChapterComments({chapter, mangaId, mangaTitle, onUpdateComments, user, 
             </div>
           )}
           {showGifInput && (
-            <div style={{display:"flex",gap:8,marginBottom:8}}>
+            <div ref={gifInputRef} style={{display:"flex",gap:8,marginBottom:8}}>
               <input className="input" placeholder="Paste an image or GIF URL…" value={gifUrlInput} onChange={e=>setGifUrlInput(e.target.value)} style={{flex:1}}/>
               <button className="btn btn-ghost btn-sm" onClick={attachGifUrl}>Add</button>
             </div>
@@ -1350,6 +1441,8 @@ function FriendsModal({ onClose, friends, incoming, outgoing, searchUsers, sendF
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
+  useDismissable(true, onClose);
+
 
   useEffect(() => {
     if (!query.trim()) { setResults([]); return; }
@@ -1434,6 +1527,8 @@ function FriendsModal({ onClose, friends, incoming, outgoing, searchUsers, sendF
 function RecommendModal({ manga, friends, sendMessage, onClose, toast, navigate }) {
   const [message, setMessage] = useState("");
   const [sentTo, setSentTo] = useState([]);
+  useDismissable(true, onClose);
+
 
   const send = async (friend) => {
     const ok = await sendMessage(friend.id, message.trim() || null, { id: manga.id, title: manga.title });
@@ -1595,6 +1690,11 @@ function ReaderPage({manga,chapterIdx,openComments,toast,navigate,onUpdateChapte
   const [showComments,setShowComments]=useState(!!openComments);
   const [pendingQuote,setPendingQuote]=useState(null);
   const [arrivalKey,setArrivalKey]=useState(null);
+  const settingsRef=useRef();
+  useDismissable(showSettings, ()=>setShowSettings(false));
+  useClickOutside(settingsRef, showSettings, ()=>setShowSettings(false));
+  useDismissable(showComments, ()=>setShowComments(false));
+
   useEffect(()=>{
     const el=containerRef.current; if(!el) return;
     const onScroll=()=>{
@@ -1657,7 +1757,7 @@ function ReaderPage({manga,chapterIdx,openComments,toast,navigate,onUpdateChapte
         <button className="btn btn-ghost btn-sm btn-icon" onClick={()=>setShowSettings(!showSettings)}>⚙</button>
       </div>
       {showSettings&&(
-        <div style={{position:"absolute",top:54,right:12,zIndex:200,background:"var(--ink-raised)",border:"1px solid var(--line-strong)",padding:16,minWidth:220,animation:"fadeUp 0.2s ease"}}>
+        <div ref={settingsRef} style={{position:"absolute",top:54,right:12,zIndex:200,background:"var(--ink-raised)",border:"1px solid var(--line-strong)",padding:16,minWidth:220,animation:"fadeUp 0.2s ease"}}>
           <div style={{fontSize:11,fontWeight:700,color:"var(--paper-faint)",marginBottom:10,letterSpacing:"0.05em",textTransform:"uppercase"}}>Reader Settings</div>
           <label style={{fontSize:13,display:"block",marginBottom:6}}>Max Width: {maxWidth}px</label>
           <input type="range" min={400} max={1200} step={50} value={maxWidth} onChange={e=>setMaxWidth(+e.target.value)} style={{width:"100%",marginBottom:12,accentColor:"var(--paper)"}}/>
@@ -1977,6 +2077,8 @@ function AuthModal({onClose, onLogin, toast}) {
   const [adminCode,setAdminCode] = useState("");
   const [loading,setLoading] = useState(false);
   const [error,setError]   = useState("");
+  useDismissable(!loading, onClose);
+
 
   const submit = async () => {
     if(!email.trim()||!password){ setError("Email and password are required."); return; }
@@ -2503,6 +2605,8 @@ function ImageCropEditor({src, aspect=2/3, title="Adjust image", onCancel, onApp
   const [fineRotate, setFineRotate] = useState(0); // -45..45 degrees
   const [offset, setOffset] = useState({x:0,y:0});
   const dragRef = useRef(null);
+  useDismissable(true, onCancel);
+
 
   const CANVAS_W = 280;
   const CANVAS_H = Math.round(CANVAS_W / aspect);
@@ -2694,6 +2798,8 @@ function EditManhwaModal({manga, onClose, toast, refetchLibrary}) {
   const [saving,setSaving] = useState(false);
   const [dragChIdx,setDragChIdx] = useState(null);
   const fileInputRef = useRef();
+  useDismissable(!saving, onClose);
+
 
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
   const toggleGenre = g => set("genres", form.genres.includes(g) ? form.genres.filter(x=>x!==g) : [...form.genres,g]);
@@ -2913,6 +3019,8 @@ function DeleteManhwaModal({manga, onClose, toast, refetchLibrary}) {
   const [deleting,setDeleting] = useState(false);
   const chapterCount = manga.chapters?.length || 0;
   const ready = confirmText.trim() === "DELETE";
+  useDismissable(!deleting, onClose);
+
 
   const doDelete = async () => {
     if (!ready) return;
@@ -3294,7 +3402,7 @@ function AppShell() {
 
   useEffect(() => { fetchMusic(); }, [fetchMusic]);
 
-  const { enabled: musicEnabled, toggle: toggleMusic, currentTrack: nowPlayingTrack, dismissCard: dismissNowPlaying } = useMusicPlayer(musicLibrary);
+  const { enabled: musicEnabled, toggle: toggleMusic, currentTrack: nowPlayingTrack, trackNum: musicTrackNum, trackCount: musicTrackCount, dismissCard: dismissNowPlaying, next: nextTrack, prev: prevTrack, holdCard: holdMusicCard, releaseCard: releaseMusicCard } = useMusicPlayer(musicLibrary);
 
   const social = useSocial(user, toast);
   const [showFriends,setShowFriends]=useState(false);
@@ -3368,7 +3476,7 @@ function AppShell() {
     return <>
       <ReaderRoute library={library} libraryLoading={libraryLoading} toast={toast} navigate={navigate}
         onUpdateChapterComments={updateChapterComments} user={user} friends={social.friends}/>
-      <NowPlayingCard track={nowPlayingTrack} onClose={dismissNowPlaying}/>
+      <NowPlayingCard track={nowPlayingTrack} trackNum={musicTrackNum} trackCount={musicTrackCount} onClose={dismissNowPlaying} onNext={nextTrack} onPrev={prevTrack} onHold={holdMusicCard} onRelease={releaseMusicCard}/>
       <ToastContainer toasts={toasts}/>
     </>;
   }
@@ -3460,7 +3568,7 @@ function AppShell() {
       </div>
       {showAuth&&<AuthModal toast={toast} onClose={()=>setShowAuth(false)} onLogin={async (authUser)=>{await loadProfile(authUser);toast(`Welcome back`, "success");}}/>}
       {showFriends&&user&&<FriendsModal onClose={()=>setShowFriends(false)} friends={social.friends} incoming={social.incoming} outgoing={social.outgoing} searchUsers={social.searchUsers} sendFriendRequest={social.sendFriendRequest} respondToRequest={social.respondToRequest} removeFriend={social.removeFriend} navigate={navigate}/>}
-      <NowPlayingCard track={nowPlayingTrack} onClose={dismissNowPlaying}/>
+      <NowPlayingCard track={nowPlayingTrack} trackNum={musicTrackNum} trackCount={musicTrackCount} onClose={dismissNowPlaying} onNext={nextTrack} onPrev={prevTrack} onHold={holdMusicCard} onRelease={releaseMusicCard}/>
       <ToastContainer toasts={toasts}/>
     </div>
   );
