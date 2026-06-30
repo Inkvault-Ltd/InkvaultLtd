@@ -2659,22 +2659,37 @@ function AppShell() {
   // Fetches the full library — series, with nested chapters, pages, and
   // comments — shaped to match what the UI components already expect
   // (cover_url -> cover, image_url -> image, etc).
+  //
+  // Commenter usernames are resolved via a separate `profiles` fetch + a
+  // client-side id->username map, rather than an embedded
+  // `comments -> profiles` join. PostgREST can only auto-embed a related
+  // table when it can resolve a foreign key between the two tables; if
+  // comments.user_id isn't declared as an FK to profiles.id, an embedded
+  // join makes the *entire* query fail (which is what "Could not load the
+  // library" meant). Fetching profiles separately works regardless of
+  // whether that FK exists.
   const fetchLibrary = useCallback(async () => {
     setLibraryLoading(true);
-    const { data, error } = await supabase
-      .from("series")
-      .select(`
-        id, title, author, description, type, status, genres, cover_url,
-        views, likes, dislikes, rating,
-        chapters (
-          id, number, title,
-          pages ( id, image_url, page_order ),
-          comments ( id, text, likes, created_at, quote_page_id, user_id, image_url, profiles ( username ) )
-        )
-      `)
-      .order("created_at", { ascending: false });
+    const [{ data, error }, { data: profilesData, error: profilesError }] = await Promise.all([
+      supabase
+        .from("series")
+        .select(`
+          id, title, author, description, type, status, genres, cover_url,
+          views, likes, dislikes, rating,
+          chapters (
+            id, number, title,
+            pages ( id, image_url, page_order ),
+            comments ( id, text, likes, created_at, quote_page_id, user_id, image_url )
+          )
+        `)
+        .order("created_at", { ascending: false }),
+      supabase.from("profiles").select("id, username"),
+    ]);
 
     if (error) { toast("Could not load the library","error"); setLibraryLoading(false); return; }
+    if (profilesError) { console.error(profilesError); }
+
+    const usernameById = new Map((profilesData || []).map(p => [p.id, p.username]));
 
     const shaped = (data || []).map(series => ({
       ...series,
@@ -2693,13 +2708,14 @@ function AppShell() {
               const quotedPage = c.quote_page_id
                 ? (ch.pages || []).find(p => p.id === c.quote_page_id)
                 : null;
+              const username = usernameById.get(c.user_id) || "unknown";
               return {
                 id: c.id,
-                user: c.profiles?.username || "unknown",
+                user: username,
                 text: c.text,
                 likes: c.likes,
                 date: new Date(c.created_at).toLocaleDateString(),
-                avatar: (c.profiles?.username || "??").slice(0,2).toUpperCase(),
+                avatar: username.slice(0,2).toUpperCase(),
                 image: c.image_url || null,
                 quote: quotedPage ? { pageIndex: quotedPage.page_order, thumb: quotedPage.image_url } : null,
               };
