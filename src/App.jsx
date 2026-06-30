@@ -3152,9 +3152,14 @@ function AppShell() {
     });
   }, [user, toast]);
 
-  // Fetches the full library — series, with nested chapters, pages, and
-  // comments — shaped to match what the UI components already expect
-  // (cover_url -> cover, image_url -> image, etc).
+  // Fetches the LIBRARY — series with lightweight chapter stubs (number,
+  // title, and page/comment *counts* via PostgREST's count aggregate) —
+  // instead of every page image and every comment for every chapter of
+  // every series. That used to all come down on every single page load,
+  // which is the main reason the site felt slow to load. Full chapter
+  // content (actual pages + comments) is now fetched on-demand per series
+  // via fetchSeriesDetail, the first time someone opens that series or its
+  // reader (or an admin edits it).
   //
   // Commenter usernames are resolved via a separate `profiles` fetch + a
   // client-side id->username map, rather than an embedded
@@ -3163,78 +3168,34 @@ function AppShell() {
   // comments.user_id isn't declared as an FK to profiles.id, an embedded
   // join makes the *entire* query fail. Fetching profiles separately works
   // regardless of whether that FK exists.
-  //
-  // comments.image_url is a newer column (for the photo/GIF attachment
-  // feature) that may not exist yet in every project's `comments` table.
-  // Selecting a column that doesn't exist fails the *whole* series query,
-  // not just that field — so we try with it first and silently retry
-  // without it if that happens, rather than taking the whole library down.
-  const SERIES_SELECT_BASE = `
+  const SERIES_SELECT_LIGHT = `
     id, title, author, description, type, status, genres, cover_url,
     views, likes, dislikes, rating,
-    chapters (
-      id, number, title,
-      pages ( id, image_url, page_order ),
-      comments ( id, text, likes, created_at, quote_page_id, user_id%COMMENT_IMAGE% )
-    )
+    chapters ( id, number, title, pages(count), comments(count) )
   `;
+
+  const extractCount = (field) => Array.isArray(field) ? (field[0]?.count || 0) : (field?.count || 0);
 
   const fetchLibrary = useCallback(async () => {
     setLibraryLoading(true);
-
-    let { data, error } = await supabase
+    const { data, error } = await supabase
       .from("series")
-      .select(SERIES_SELECT_BASE.replace("%COMMENT_IMAGE%", ", image_url"))
+      .select(SERIES_SELECT_LIGHT)
       .order("created_at", { ascending: false });
 
-    let commentsHaveImages = true;
-    if (error) {
-      // Most likely cause: comments.image_url doesn't exist yet. Retry
-      // without it so the rest of the app still works.
-      commentsHaveImages = false;
-      const retry = await supabase
-        .from("series")
-        .select(SERIES_SELECT_BASE.replace("%COMMENT_IMAGE%", ""))
-        .order("created_at", { ascending: false });
-      data = retry.data;
-      error = retry.error;
-    }
-
-    if (error) { toast("Could not load the library","error"); setLibraryLoading(false); return; }
-
-    const { data: profilesData, error: profilesError } = await supabase.from("profiles").select("id, username");
-    if (profilesError) { console.error(profilesError); }
-    const usernameById = new Map((profilesData || []).map(p => [p.id, p.username]));
+    if (error) { toast("Could not load the library", "error"); setLibraryLoading(false); return; }
 
     const shaped = (data || []).map(series => ({
       ...series,
       cover: series.cover_url,
+      detailLoaded: false,
       chapters: (series.chapters || [])
-        .sort((a,b) => a.number - b.number)
+        .sort((a, b) => a.number - b.number)
         .map(ch => ({
-          ...ch,
-          date: "", // chapters table doesn't track a display date yet
-          pages: (ch.pages || [])
-            .sort((a,b) => a.page_order - b.page_order)
-            .map(p => ({ id: p.id, image: p.image_url, order: p.page_order })),
-          comments: (ch.comments || [])
-            .sort((a,b) => new Date(b.created_at) - new Date(a.created_at))
-            .map(c => {
-              const quotedPage = c.quote_page_id
-                ? (ch.pages || []).find(p => p.id === c.quote_page_id)
-                : null;
-              const username = usernameById.get(c.user_id) || "unknown";
-              return {
-                id: c.id,
-                user: username,
-                text: c.text,
-                likes: c.likes,
-                date: new Date(c.created_at).toLocaleDateString(),
-                avatar: username.slice(0,2).toUpperCase(),
-                image: commentsHaveImages ? (c.image_url || null) : null,
-                quote: quotedPage ? { pageIndex: quotedPage.page_order, thumb: quotedPage.image_url } : null,
-              };
-            }),
+          id: ch.id, number: ch.number, title: ch.title, date: "",
+          pageCount: extractCount(ch.pages),
+          commentCount: extractCount(ch.comments),
+          pages: [], comments: [],
         })),
     }));
     setLibrary(shaped);
@@ -3242,6 +3203,86 @@ function AppShell() {
   }, [toast]);
 
   useEffect(() => { fetchLibrary(); }, [fetchLibrary]);
+
+  // comments.image_url is a newer column (for the photo/GIF attachment
+  // feature) that may not exist yet in every project's `comments` table.
+  // Selecting a column that doesn't exist fails the whole query, so we try
+  // with it first and silently retry without it if that happens.
+  const CHAPTER_DETAIL_BASE = `
+    id,
+    chapters (
+      id, number, title,
+      pages ( id, image_url, page_order ),
+      comments ( id, text, likes, created_at, quote_page_id, user_id%COMMENT_IMAGE% )
+    )
+  `;
+
+  const seriesDetailRequests = useRef(new Map()); // seriesId -> in-flight promise, so callers can share/await one fetch
+
+  // Loads the real pages + comments for a single series and merges them
+  // into `library`, replacing that series' lightweight chapter stubs.
+  const fetchSeriesDetail = useCallback(async (seriesId) => {
+    if (seriesDetailRequests.current.has(seriesId)) return seriesDetailRequests.current.get(seriesId);
+
+    const run = (async () => {
+      let { data, error } = await supabase
+        .from("series")
+        .select(CHAPTER_DETAIL_BASE.replace("%COMMENT_IMAGE%", ", image_url"))
+        .eq("id", seriesId)
+        .single();
+
+      let commentsHaveImages = true;
+      if (error) {
+        commentsHaveImages = false;
+        const retry = await supabase
+          .from("series")
+          .select(CHAPTER_DETAIL_BASE.replace("%COMMENT_IMAGE%", ""))
+          .eq("id", seriesId)
+          .single();
+        data = retry.data;
+        error = retry.error;
+      }
+      if (error || !data) { toast("Could not load that series' chapters", "error"); return; }
+
+      const { data: profilesData } = await supabase.from("profiles").select("id, username");
+      const usernameById = new Map((profilesData || []).map(p => [p.id, p.username]));
+
+      const shapedChapters = (data.chapters || [])
+        .sort((a, b) => a.number - b.number)
+        .map(ch => ({
+          id: ch.id, number: ch.number, title: ch.title, date: "",
+          pages: (ch.pages || [])
+            .sort((a, b) => a.page_order - b.page_order)
+            .map(p => ({ id: p.id, image: p.image_url, order: p.page_order })),
+          comments: (ch.comments || [])
+            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+            .map(c => {
+              const quotedPage = c.quote_page_id ? (ch.pages || []).find(p => p.id === c.quote_page_id) : null;
+              const username = usernameById.get(c.user_id) || "unknown";
+              return {
+                id: c.id, user: username, text: c.text, likes: c.likes,
+                date: new Date(c.created_at).toLocaleDateString(),
+                avatar: username.slice(0, 2).toUpperCase(),
+                image: commentsHaveImages ? (c.image_url || null) : null,
+                quote: quotedPage ? { pageIndex: quotedPage.page_order, thumb: quotedPage.image_url } : null,
+              };
+            }),
+        }));
+
+      setLibrary(prev => prev.map(s => s.id === seriesId ? { ...s, chapters: shapedChapters, detailLoaded: true } : s));
+    })();
+
+    seriesDetailRequests.current.set(seriesId, run);
+    try { await run; } finally { seriesDetailRequests.current.delete(seriesId); }
+  }, [toast]);
+
+  // Call this anywhere full chapter content is about to be needed (opening
+  // a series page, the reader, or the admin editor). It's a no-op if that
+  // series' detail is already loaded or already being fetched.
+  const ensureSeriesDetail = useCallback((seriesId, manga) => {
+    if (!seriesId || (manga && manga.detailLoaded)) return Promise.resolve();
+    return fetchSeriesDetail(seriesId);
+  }, [fetchSeriesDetail]);
 
   // Admin-managed background music: a flat list of { id, title, producer, url }
   // tracks, toggleable on/off per-user via useMusicPlayer below.
