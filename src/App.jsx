@@ -1753,7 +1753,6 @@ function ReaderPage({manga,chapterIdx,openComments,toast,navigate,onUpdateChapte
           <div className="brush" style={{fontSize:13,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{manga.title}</div>
           <div style={{fontSize:11,color:"var(--paper-faint)"}}>{chapter.title} · Page {currentPage+1}/{pages.length}</div>
         </div>
-        <button className="btn btn-ghost btn-sm btn-icon" onClick={()=>setShowComments(true)}>💬</button>
         <button className="btn btn-ghost btn-sm btn-icon" onClick={()=>setShowSettings(!showSettings)}>⚙</button>
       </div>
       {showSettings&&(
@@ -1793,6 +1792,7 @@ function ReaderPage({manga,chapterIdx,openComments,toast,navigate,onUpdateChapte
         <button className="btn btn-ghost btn-sm" onClick={()=>goChapter(-1)}>← Prev</button>
         <div style={{flex:1,textAlign:"center",fontSize:12,color:"var(--paper-faint)"}}>Ch.{chapter.number} · {Math.round(progress)}%</div>
         <button className="btn btn-primary btn-sm" onClick={()=>goChapter(1)}>Next →</button>
+        <button className="btn btn-ghost btn-sm btn-icon" onClick={()=>setShowComments(true)} title="Discussion" aria-label="Open comments">💬</button>
       </div>
       <div className="panel-nav" style={{opacity:showNav?1:0.15}}>
         {pages.slice(0,20).map((_,i)=>{
@@ -2269,7 +2269,7 @@ function PageUploader({pages, onAddPages, onRemovePage, onReorder, toast}) {
   );
 }
 
-function AdminPanel({library,refetchLibrary,user,toast,musicLibrary,refetchMusic}) {
+function AdminPanel({library,refetchLibrary,user,toast,musicLibrary,refetchMusic,ensureSeriesDetail}) {
   const [adminTab,setAdminTab]=useState("manage");
 
   return (
@@ -2283,7 +2283,7 @@ function AdminPanel({library,refetchLibrary,user,toast,musicLibrary,refetchMusic
           }}>{label}</button>
         ))}
       </div>
-      {adminTab==="manage" && <AdminLibraryManager library={library} refetchLibrary={refetchLibrary} toast={toast}/>}
+      {adminTab==="manage" && <AdminLibraryManager library={library} refetchLibrary={refetchLibrary} toast={toast} ensureSeriesDetail={ensureSeriesDetail}/>}
       {adminTab==="upload" && <AdminUploadWizard refetchLibrary={refetchLibrary} user={user} toast={toast}/>}
       {adminTab==="music" && <AdminMusicManager musicLibrary={musicLibrary} refetchMusic={refetchMusic} toast={toast}/>}
     </div>
@@ -2713,11 +2713,12 @@ function ImageCropEditor({src, aspect=2/3, title="Adjust image", onCancel, onApp
    Admin — manage existing manhwas (edit / delete)
    ========================================================================== */
 
-function AdminLibraryManager({library, refetchLibrary, toast}) {
+function AdminLibraryManager({library, refetchLibrary, toast, ensureSeriesDetail}) {
   const [search,setSearch] = useState("");
   const [filterStatus,setFilterStatus] = useState("");
-  const [editingManga,setEditingManga] = useState(null);
-  const [deletingManga,setDeletingManga] = useState(null);
+  const [editingMangaId,setEditingMangaId] = useState(null);
+  const [deletingMangaId,setDeletingMangaId] = useState(null);
+  const [loadingEditId,setLoadingEditId] = useState(null);
 
   const filtered = useMemo(()=>{
     const q = search.trim().toLowerCase();
@@ -2727,6 +2728,24 @@ function AdminLibraryManager({library, refetchLibrary, toast}) {
       return m.title?.toLowerCase().includes(q) || m.author?.toLowerCase().includes(q);
     });
   },[library, search, filterStatus]);
+
+  // Look these up from the live `library` (rather than holding a snapshot)
+  // so that once ensureSeriesDetail resolves and pages/comments arrive, the
+  // modal picks them up automatically on the next render.
+  const editingManga = editingMangaId ? (library||[]).find(m=>m.id===editingMangaId) : null;
+  const deletingManga = deletingMangaId ? (library||[]).find(m=>m.id===deletingMangaId) : null;
+
+  // Editing needs the real chapter pages, which the admin list (like the
+  // rest of the library) only carries as lightweight stubs — load the full
+  // detail first so the edit form doesn't open to a chapter with no pages.
+  const openEdit = async (m) => {
+    if (!m.detailLoaded) {
+      setLoadingEditId(m.id);
+      await ensureSeriesDetail(m.id, m);
+      setLoadingEditId(null);
+    }
+    setEditingMangaId(m.id);
+  };
 
   return (
     <div className="animate-fadeUp">
@@ -2757,8 +2776,8 @@ function AdminLibraryManager({library, refetchLibrary, toast}) {
                 <div style={{fontWeight:700,fontSize:14,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{m.title}</div>
                 <div style={{fontSize:11.5,color:"var(--paper-faint)",marginTop:2}}>{m.author||"Unknown author"} · {m.chapters?.length||0} chapters · {m.status}</div>
               </div>
-              <button className="btn btn-ghost btn-sm" onClick={()=>setEditingManga(m)}>Edit</button>
-              <button className="btn btn-danger btn-sm" onClick={()=>setDeletingManga(m)}>Delete</button>
+              <button className="btn btn-ghost btn-sm" disabled={loadingEditId===m.id} onClick={()=>openEdit(m)}>{loadingEditId===m.id?"Loading…":"Edit"}</button>
+              <button className="btn btn-danger btn-sm" onClick={()=>setDeletingMangaId(m.id)}>Delete</button>
             </div>
           ))}
         </div>
@@ -2766,11 +2785,11 @@ function AdminLibraryManager({library, refetchLibrary, toast}) {
 
       {editingManga && (
         <EditManhwaModal manga={editingManga} toast={toast} refetchLibrary={refetchLibrary}
-          onClose={()=>setEditingManga(null)}/>
+          onClose={()=>setEditingMangaId(null)}/>
       )}
       {deletingManga && (
         <DeleteManhwaModal manga={deletingManga} toast={toast} refetchLibrary={refetchLibrary}
-          onClose={()=>setDeletingManga(null)}/>
+          onClose={()=>setDeletingMangaId(null)}/>
       )}
     </div>
   );
@@ -3126,9 +3145,13 @@ function ProfilePage({user,bookmarks,toast,signOut,navigate,onOpenFriends,incomi
 // Route wrapper for /series/:slug — resolves the manga from the library by
 // slug so the page works on a hard refresh / shared link / new tab, not just
 // when arriving via an in-app click.
-function DetailRoute({library, libraryLoading, bookmarks, setBookmarks, toast, navigate, user, friends, sendMessage}) {
+function DetailRoute({library, libraryLoading, bookmarks, setBookmarks, toast, navigate, user, friends, sendMessage, ensureSeriesDetail}) {
   const { slug } = useParams();
   const manga = useMemo(()=>findBySlug(library, slug), [library, slug]);
+
+  useEffect(() => {
+    if (manga && !manga.detailLoaded) ensureSeriesDetail(manga.id, manga);
+  }, [manga, ensureSeriesDetail]);
 
   if (libraryLoading && !manga) {
     return <div style={{display:"flex",justifyContent:"center",padding:"100px 0"}}><InkSplashLoader label="loading series" size={72}/></div>;
@@ -3147,7 +3170,7 @@ function DetailRoute({library, libraryLoading, bookmarks, setBookmarks, toast, n
 
 // Route wrapper for /series/:slug/read/:chapterIdx (1-based in the URL,
 // converted to a 0-based array index for the chapters array).
-function ReaderRoute({library, libraryLoading, toast, navigate, onUpdateChapterComments, user, friends}) {
+function ReaderRoute({library, libraryLoading, toast, navigate, onUpdateChapterComments, user, friends, ensureSeriesDetail}) {
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const match = location.pathname.match(/^\/series\/([^/]+)\/read\/(\d+)$/);
@@ -3157,14 +3180,13 @@ function ReaderRoute({library, libraryLoading, toast, navigate, onUpdateChapterC
   const chapterNumber = parseInt(chapterIdx, 10) || 1;
   const idx = manga ? manga.chapters.findIndex(c => c.number === chapterNumber) : -1;
 
-  console.log("ReaderRoute debug:", {
-    slug, chapterIdx, chapterNumber,
-    mangaFound: !!manga,
-    mangaTitle: manga?.title,
-    chapterCount: manga?.chapters?.length,
-    chapterNumbers: manga?.chapters?.map(c => c.number),
-    resolvedIdx: idx,
-  });
+  // The library list only carries lightweight chapter stubs (no actual page
+  // images) to keep the initial load fast — this fetches the real pages
+  // for this one series the moment we land on a chapter, and is a no-op if
+  // they're already loaded.
+  useEffect(() => {
+    if (manga && !manga.detailLoaded) ensureSeriesDetail(manga.id, manga);
+  }, [manga, ensureSeriesDetail]);
 
   if (libraryLoading && !manga) {
     return <FullscreenInkLoader/>;
@@ -3177,6 +3199,9 @@ function ReaderRoute({library, libraryLoading, toast, navigate, onUpdateChapterC
         <button className="btn btn-primary" onClick={()=>navigate(manga?seriesPath(manga):"/")}>← Back</button>
       </div>
     );
+  }
+  if (!manga.detailLoaded) {
+    return <FullscreenInkLoader/>;
   }
   return <ReaderPage manga={manga} chapterIdx={idx} openComments={searchParams.get("comments")==="1"}
     toast={toast} navigate={navigate} onUpdateChapterComments={onUpdateChapterComments} user={user} friends={friends}/>;
@@ -3352,8 +3377,16 @@ function AppShell() {
       }
       if (error || !data) { toast("Could not load that series' chapters", "error"); return; }
 
-      const { data: profilesData } = await supabase.from("profiles").select("id, username");
-      const usernameById = new Map((profilesData || []).map(p => [p.id, p.username]));
+      // Only look up the handful of people who actually commented here,
+      // instead of pulling every profile in the app on every chapter load.
+      const commentUserIds = Array.from(new Set(
+        (data.chapters || []).flatMap(ch => (ch.comments || []).map(c => c.user_id))
+      ));
+      let usernameById = new Map();
+      if (commentUserIds.length) {
+        const { data: profilesData } = await supabase.from("profiles").select("id, username").in("id", commentUserIds);
+        usernameById = new Map((profilesData || []).map(p => [p.id, p.username]));
+      }
 
       const shapedChapters = (data.chapters || [])
         .sort((a, b) => a.number - b.number)
@@ -3434,19 +3467,36 @@ function AppShell() {
     link.type = "image/png";
     link.href = ASSET_FAVICON_64;
 
-    const t=setTimeout(()=>setBooting(false), 1100);
     return()=>{
       document.head.removeChild(style);
-      clearTimeout(t);
       if (createdLink) { link.remove(); }
       else { link.href = previousHref; }
     };
   },[]);
 
-  // Posting/deleting a comment writes straight to Supabase, then refetches
-  // the library so the new comment (and its quote thumbnail, if any) shows
-  // up everywhere it's displayed — same as the old local-array replace did,
-  // just backed by a real table now.
+  // The splash loader used to be a flat, unconditional 1.1s timer — meaning
+  // every single load/refresh sat on a loading screen for over a second
+  // even once the library had already arrived. Now it clears as soon as
+  // the first library fetch resolves (with a tiny minimum so it doesn't
+  // just flash), and a longer safety-net timeout in case that fetch hangs
+  // or errors, so the app never gets stuck behind the splash forever.
+  useEffect(() => {
+    const safetyNet = setTimeout(() => setBooting(false), 5000);
+    return () => clearTimeout(safetyNet);
+  }, []);
+  useEffect(() => {
+    if (libraryLoading) return;
+    const t = setTimeout(() => setBooting(false), 150);
+    return () => clearTimeout(t);
+  }, [libraryLoading]);
+
+  // Posting/deleting a comment writes straight to Supabase, then re-fetches
+  // just that one series' full detail (pages + comments) so the new comment
+  // shows up. This used to call fetchLibrary() — the *lightweight* query —
+  // which doesn't just refresh comments, it resets every series' chapters
+  // back to their unloaded stub (pages: [], detailLoaded: false). In the
+  // reader that meant posting a comment would wipe out the pages you were
+  // currently reading out from under you.
   const updateChapterComments = useCallback(async (mangaId, chapterId, newComments, meta) => {
     if (meta?.type === "delete") {
       await supabase.from("comments").delete().eq("id", meta.commentId);
@@ -3463,8 +3513,8 @@ function AppShell() {
         image_url: imageUrl,
       });
     }
-    fetchLibrary();
-  },[user, fetchLibrary]);
+    fetchSeriesDetail(mangaId);
+  },[user, fetchSeriesDetail]);
 
   if (booting) {
     return <FullscreenInkLoader />;
@@ -3475,7 +3525,7 @@ function AppShell() {
   if (isReaderPath(location.pathname)) {
     return <>
       <ReaderRoute library={library} libraryLoading={libraryLoading} toast={toast} navigate={navigate}
-        onUpdateChapterComments={updateChapterComments} user={user} friends={social.friends}/>
+        onUpdateChapterComments={updateChapterComments} user={user} friends={social.friends} ensureSeriesDetail={ensureSeriesDetail}/>
       <NowPlayingCard track={nowPlayingTrack} trackNum={musicTrackNum} trackCount={musicTrackCount} onClose={dismissNowPlaying} onNext={nextTrack} onPrev={prevTrack} onHold={holdMusicCard} onRelease={releaseMusicCard}/>
       <ToastContainer toasts={toasts}/>
     </>;
@@ -3513,7 +3563,7 @@ function AppShell() {
             <HomePage library={library} libraryLoading={libraryLoading} bookmarks={bookmarks} setBookmarks={setBookmarks} toast={toast} navigate={navigate}/>
           }/>
           <Route path="/series/:slug" element={
-            <DetailRoute library={library} libraryLoading={libraryLoading} bookmarks={bookmarks} setBookmarks={setBookmarks} toast={toast} navigate={navigate} user={user} friends={social.friends} sendMessage={social.sendMessage}/>
+            <DetailRoute library={library} libraryLoading={libraryLoading} bookmarks={bookmarks} setBookmarks={setBookmarks} toast={toast} navigate={navigate} user={user} friends={social.friends} sendMessage={social.sendMessage} ensureSeriesDetail={ensureSeriesDetail}/>
           }/>
           <Route path="/profile" element={
             user?<ProfilePage user={user} bookmarks={bookmarks} toast={toast} signOut={signOut} navigate={navigate} onOpenFriends={()=>setShowFriends(true)} incomingCount={social.incoming.length}/>:(
@@ -3543,7 +3593,7 @@ function AppShell() {
             )
           }/>
           <Route path="/admin" element={
-            user?.isAdmin?<AdminPanel library={library} refetchLibrary={fetchLibrary} user={user} toast={toast} musicLibrary={musicLibrary} refetchMusic={fetchMusic}/>:(
+            user?.isAdmin?<AdminPanel library={library} refetchLibrary={fetchLibrary} user={user} toast={toast} musicLibrary={musicLibrary} refetchMusic={fetchMusic} ensureSeriesDetail={ensureSeriesDetail}/>:(
               <div style={{textAlign:"center",padding:"80px 20px"}}>
                 <div className="brush" style={{fontSize:36,marginBottom:14}}>鎖</div>
                 <div className="brush" style={{fontSize:18,fontWeight:800,marginBottom:10}}>Admin access required</div>
