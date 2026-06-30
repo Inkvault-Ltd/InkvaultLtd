@@ -2665,30 +2665,49 @@ function AppShell() {
   // `comments -> profiles` join. PostgREST can only auto-embed a related
   // table when it can resolve a foreign key between the two tables; if
   // comments.user_id isn't declared as an FK to profiles.id, an embedded
-  // join makes the *entire* query fail (which is what "Could not load the
-  // library" meant). Fetching profiles separately works regardless of
-  // whether that FK exists.
+  // join makes the *entire* query fail. Fetching profiles separately works
+  // regardless of whether that FK exists.
+  //
+  // comments.image_url is a newer column (for the photo/GIF attachment
+  // feature) that may not exist yet in every project's `comments` table.
+  // Selecting a column that doesn't exist fails the *whole* series query,
+  // not just that field — so we try with it first and silently retry
+  // without it if that happens, rather than taking the whole library down.
+  const SERIES_SELECT_BASE = `
+    id, title, author, description, type, status, genres, cover_url,
+    views, likes, dislikes, rating,
+    chapters (
+      id, number, title,
+      pages ( id, image_url, page_order ),
+      comments ( id, text, likes, created_at, quote_page_id, user_id%COMMENT_IMAGE% )
+    )
+  `;
+
   const fetchLibrary = useCallback(async () => {
     setLibraryLoading(true);
-    const [{ data, error }, { data: profilesData, error: profilesError }] = await Promise.all([
-      supabase
+
+    let { data, error } = await supabase
+      .from("series")
+      .select(SERIES_SELECT_BASE.replace("%COMMENT_IMAGE%", ", image_url"))
+      .order("created_at", { ascending: false });
+
+    let commentsHaveImages = true;
+    if (error) {
+      // Most likely cause: comments.image_url doesn't exist yet. Retry
+      // without it so the rest of the app still works.
+      commentsHaveImages = false;
+      const retry = await supabase
         .from("series")
-        .select(`
-          id, title, author, description, type, status, genres, cover_url,
-          views, likes, dislikes, rating,
-          chapters (
-            id, number, title,
-            pages ( id, image_url, page_order ),
-            comments ( id, text, likes, created_at, quote_page_id, user_id, image_url )
-          )
-        `)
-        .order("created_at", { ascending: false }),
-      supabase.from("profiles").select("id, username"),
-    ]);
+        .select(SERIES_SELECT_BASE.replace("%COMMENT_IMAGE%", ""))
+        .order("created_at", { ascending: false });
+      data = retry.data;
+      error = retry.error;
+    }
 
     if (error) { toast("Could not load the library","error"); setLibraryLoading(false); return; }
-    if (profilesError) { console.error(profilesError); }
 
+    const { data: profilesData, error: profilesError } = await supabase.from("profiles").select("id, username");
+    if (profilesError) { console.error(profilesError); }
     const usernameById = new Map((profilesData || []).map(p => [p.id, p.username]));
 
     const shaped = (data || []).map(series => ({
@@ -2716,7 +2735,7 @@ function AppShell() {
                 likes: c.likes,
                 date: new Date(c.created_at).toLocaleDateString(),
                 avatar: username.slice(0,2).toUpperCase(),
-                image: c.image_url || null,
+                image: commentsHaveImages ? (c.image_url || null) : null,
                 quote: quotedPage ? { pageIndex: quotedPage.page_order, thumb: quotedPage.image_url } : null,
               };
             }),
