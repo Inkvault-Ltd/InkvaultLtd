@@ -88,6 +88,12 @@ const ASSET_SPLASH_FRAMES = [
    - A real admin uploader: pages can be added from the user's device
      (file picker or drag-and-drop from desktop/gallery), reordered, removed,
      previewed — no more auto-generated placeholder-only chapters
+   - Comments can include a photo (device upload) or a GIF/image URL,
+     rendered inline below the comment text (requires a `comments.image_url`
+     text column in Supabase — see updateChapterComments)
+   - Comment author names are now resolved correctly: the library fetch
+     joins `comments.user_id -> profiles.username` (the join was missing
+     before, which silently fell back to "unknown" for every commenter)
    ========================================================================== */
 
 const GLOBAL_CSS = `
@@ -953,19 +959,38 @@ function DetailPage({manga,setManga,bookmarks,setBookmarks,toast,navigate,user})
 function ChapterComments({chapter, mangaId, onUpdateComments, user, toast, pendingQuote, onConsumeQuote, onJumpToPage}) {
   const [text,setText]=useState("");
   const [posting,setPosting]=useState(false);
+  const [attachedImage,setAttachedImage]=useState(null); // data URL (upload) or direct https URL (pasted GIF link)
+  const [gifUrlInput,setGifUrlInput]=useState("");
+  const [showGifInput,setShowGifInput]=useState(false);
+  const fileInputRef=useRef(null);
   const comments = chapter.comments || [];
+
+  const pickImage = async (fileList) => {
+    const [url] = await filesToDataUrls(fileList).catch(()=>[]);
+    if (url) setAttachedImage(url);
+  };
+
+  const attachGifUrl = () => {
+    const url = gifUrlInput.trim();
+    if (!url) return;
+    setAttachedImage(url);
+    setGifUrlInput("");
+    setShowGifInput(false);
+  };
 
   const post = async () => {
     if(!user){toast("Sign in to comment","warn");return;}
-    if(!text.trim() && !pendingQuote)return;
+    if(!text.trim() && !pendingQuote && !attachedImage)return;
     setPosting(true);
     await onUpdateComments(mangaId, chapter.id, null, {
       type: "insert",
       text: text.trim(),
       quotePageId: pendingQuote?.pageId || null,
+      imageUrl: attachedImage,
     });
     setPosting(false);
     setText("");
+    setAttachedImage(null);
     if(pendingQuote) onConsumeQuote();
     toast("Comment posted","success");
   };
@@ -984,7 +1009,24 @@ function ChapterComments({chapter, mangaId, onUpdateComments, user, toast, pendi
       {user ? (
         <div style={{marginBottom:20}}>
           <textarea className="input" rows={3} placeholder={pendingQuote ? "Add a comment about this page…" : "Share your thoughts on this chapter…"} value={text} onChange={e=>setText(e.target.value)} style={{resize:"vertical",marginBottom:8}}/>
-          <button className="btn btn-primary btn-sm" onClick={post} disabled={posting}>{posting ? "Posting…" : "Post Comment"}</button>
+          {attachedImage && (
+            <div style={{position:"relative",display:"inline-block",marginBottom:8}}>
+              <img src={attachedImage} alt="Attachment preview" style={{maxWidth:160,maxHeight:160,display:"block",border:"1px solid var(--line-strong)"}}/>
+              <button onClick={()=>setAttachedImage(null)} style={{position:"absolute",top:4,right:4,background:"var(--ink)",color:"var(--paper)",border:"none",width:20,height:20,cursor:"pointer",fontSize:11}}>✕</button>
+            </div>
+          )}
+          {showGifInput && (
+            <div style={{display:"flex",gap:8,marginBottom:8}}>
+              <input className="input" placeholder="Paste an image or GIF URL…" value={gifUrlInput} onChange={e=>setGifUrlInput(e.target.value)} style={{flex:1}}/>
+              <button className="btn btn-ghost btn-sm" onClick={attachGifUrl}>Add</button>
+            </div>
+          )}
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            <button className="btn btn-primary btn-sm" onClick={post} disabled={posting}>{posting ? "Posting…" : "Post Comment"}</button>
+            <button className="btn btn-ghost btn-sm" onClick={()=>fileInputRef.current?.click()}>🖼 Photo</button>
+            <button className="btn btn-ghost btn-sm" onClick={()=>setShowGifInput(s=>!s)}>GIF</button>
+            <input ref={fileInputRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>{pickImage(e.target.files);e.target.value="";}}/>
+          </div>
         </div>
       ) : (
         <div style={{padding:"16px",border:"1px solid var(--line)",marginBottom:16,fontSize:13,color:"var(--paper-faint)"}}>Sign in to leave a comment</div>
@@ -1015,6 +1057,9 @@ function CommentItem({comment,user,toast,onDelete,onJumpToPage}) {
           <span style={{fontSize:11,color:"var(--paper-faint)",marginLeft:"auto"}}>{comment.date}</span>
         </div>
         {comment.text && <p style={{fontSize:14,lineHeight:1.5,wordBreak:"break-word"}}>{comment.text}</p>}
+        {comment.image && (
+          <img src={comment.image} alt="Comment attachment" style={{maxWidth:220,maxHeight:220,display:"block",marginTop:6,marginBottom:6,border:"1px solid var(--line)",cursor:"pointer"}} onClick={()=>window.open(comment.image,"_blank")}/>
+        )}
         {comment.quote && onJumpToPage && (
           <div className="quote-card" onClick={()=>onJumpToPage(comment.quote.pageIndex)} title={`Jump to Page ${comment.quote.pageIndex+1}`}>
             <div className="quote-thumb-wrap">
@@ -2624,7 +2669,7 @@ function AppShell() {
         chapters (
           id, number, title,
           pages ( id, image_url, page_order ),
-          comments ( id, text, likes, created_at, quote_page_id, user_id )
+          comments ( id, text, likes, created_at, quote_page_id, user_id, image_url, profiles ( username ) )
         )
       `)
       .order("created_at", { ascending: false });
@@ -2655,6 +2700,7 @@ function AppShell() {
                 likes: c.likes,
                 date: new Date(c.created_at).toLocaleDateString(),
                 avatar: (c.profiles?.username || "??").slice(0,2).toUpperCase(),
+                image: c.image_url || null,
                 quote: quotedPage ? { pageIndex: quotedPage.page_order, thumb: quotedPage.image_url } : null,
               };
             }),
@@ -2712,11 +2758,16 @@ function AppShell() {
     if (meta?.type === "delete") {
       await supabase.from("comments").delete().eq("id", meta.commentId);
     } else if (meta?.type === "insert") {
+      let imageUrl = meta.imageUrl || null;
+      if (imageUrl && imageUrl.startsWith("data:")) {
+        imageUrl = await uploadDataUrlToStorage(imageUrl, "comment");
+      }
       await supabase.from("comments").insert({
         chapter_id: chapterId,
         user_id: user.id,
         text: meta.text,
         quote_page_id: meta.quotePageId || null,
+        image_url: imageUrl,
       });
     }
     fetchLibrary();
