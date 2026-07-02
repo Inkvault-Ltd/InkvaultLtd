@@ -350,7 +350,7 @@ const GLOBAL_CSS = `
      which is what keeps this cheap even at full-bleed size. ---- */
   .liquid-bg { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
   .liquid-blob {
-    position: absolute; filter: blur(70px); opacity: 0.55;
+    position: absolute; opacity: 0.55;
     will-change: transform; transform: translate3d(0,0,0);
     animation: liquidDriftA 26s ease-in-out infinite;
   }
@@ -361,13 +361,16 @@ const GLOBAL_CSS = `
      per-element via style, since each blob references its own <filter> id)
      does the beat-reactive warping; --energy (written straight to the DOM
      from the beat-detector rAF loop, no React re-renders) drives opacity so
-     the shape visibly brightens on louder passages, not just distorts. */
+     the shape visibly brightens on louder passages, not just distorts.
+     Blur is also set inline (combined into that same filter string) rather
+     than here — an element's inline `style.filter` always wins over any
+     stylesheet `filter` rule for the same element, so a CSS-only blur here
+     would never actually apply on top of it. */
   .liquid-blob.liquid-favicon {
-    object-fit: contain; filter: blur(6px);
-    opacity: calc(0.45 + var(--energy, 0) * 0.4);
+    object-fit: contain;
+    opacity: calc(0.6 + var(--energy, 0) * 0.35);
     transition: opacity 0.08s linear;
   }
-  .liquid-bg.music-live .liquid-blob.liquid-favicon { filter: blur(3px); }
   /* Brief brightening flash on a detected beat/drop — a discrete React
      state toggle (not per-frame), so this is the one part of the effect
      allowed to go through a normal re-render. */
@@ -391,7 +394,7 @@ const GLOBAL_CSS = `
   }
   @media (prefers-reduced-motion: reduce) {
     .liquid-blob { animation: none; }
-    .liquid-blob.liquid-favicon { filter: blur(6px); opacity: 0.45; }
+    .liquid-blob.liquid-favicon { opacity: 0.45; }
     .liquid-bg.beat-flash::after { animation: none; opacity: 0; }
   }
 
@@ -651,6 +654,17 @@ function BeatReactiveLiquidBackground({ audioEl, musicEnabled }) {
   const scaleB = useRef(10);
   const [beatFlash, setBeatFlash] = useState(false);
   const flashTimer = useRef(null);
+  // The blur used to live only in CSS (`filter: blur(...)`), but each blob
+  // also sets `filter: url(#liquidDistort…)` inline for the SVG distortion —
+  // and inline styles always win over stylesheet rules for the same
+  // property, so the CSS blur was silently never applied. Blur now lives
+  // here instead, combined into the same inline filter string, dialed up
+  // hard at rest so the blob dissolves into a soft color gradient rather
+  // than reading as a shape, and eased down while music is live so the
+  // beat-reactive distortion stays visible.
+  const restBlur = 130;
+  const liveBlur = 46;
+  const blurPx = musicEnabled ? liveBlur : restBlur;
 
   const handleFrame = useCallback((level, isBeat) => {
     // Spring toward an energy-driven target scale; beats kick it up hard,
@@ -690,11 +704,11 @@ function BeatReactiveLiquidBackground({ audioEl, musicEnabled }) {
       </svg>
       {sealMask && (
         <img ref={blobARef} src={sealMask} alt="" className="liquid-blob liquid-favicon"
-          style={{ left: "-16%", top: "-20%", width: "62vw", height: "62vw", filter: "url(#liquidDistortA)" }} />
+          style={{ left: "-16%", top: "-20%", width: "62vw", height: "62vw", filter: `blur(${blurPx}px) url(#liquidDistortA)`, transition: "filter 0.6s var(--ease)" }} />
       )}
       {jadeMask && (
         <img ref={blobBRef} src={jadeMask} alt="" className="liquid-blob liquid-favicon b2"
-          style={{ right: "-20%", bottom: "-16%", width: "56vw", height: "56vw", filter: "url(#liquidDistortB)" }} />
+          style={{ right: "-20%", bottom: "-16%", width: "56vw", height: "56vw", filter: `blur(${blurPx}px) url(#liquidDistortB)`, transition: "filter 0.6s var(--ease)" }} />
       )}
     </div>
   );
