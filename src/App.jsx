@@ -105,6 +105,11 @@ const GLOBAL_CSS = `
     --line: rgba(244,242,237,0.10); --line-strong: rgba(244,242,237,0.22); --line-bright: rgba(244,242,237,0.4);
     --wash: rgba(244,242,237,0.045);
     --seal: #C8312A; --seal-bright: #E64A3F; --seal-dim: rgba(200,49,42,0.16);
+    /* jade — the seal's complement on the wheel (warm vermillion / cool
+       jade-teal), the classic ink-and-seal pairing. Used sparingly as the
+       "alive" accent (active states, links, ratings) so the app stays
+       mostly monochrome but never flat. */
+    --jade: #3E8E7E; --jade-bright: #55B4A0; --jade-dim: rgba(62,142,126,0.16);
     --ok: #F4F2ED; --warn: #D9A04B;
     --radius: 3px; --radius-lg: 6px;
     --ease: cubic-bezier(.16,.84,.32,1);
@@ -170,6 +175,17 @@ const GLOBAL_CSS = `
   .animate-fadeUp { animation: fadeUp 0.45s var(--ease) forwards; }
   .animate-fadeIn { animation: fadeIn 0.28s ease forwards; }
   .animate-popIn { animation: popIn 0.25s var(--ease) forwards; }
+
+  /* ---- reveal: scroll-triggered entrance, toggled by IntersectionObserver
+     (see useReveal hook) rather than a scroll listener, and animating only
+     opacity + transform so it stays on the compositor thread — cheap even
+     with dozens of cards on screen. --d sets a per-item stagger delay. ---- */
+  .reveal { opacity: 0; transform: translateY(16px); transition: opacity 0.55s var(--ease), transform 0.55s var(--ease); transition-delay: var(--d, 0s); will-change: opacity, transform; }
+  .reveal.in-view { opacity: 1; transform: translateY(0); }
+  @media (prefers-reduced-motion: reduce) {
+    .reveal { opacity: 1; transform: none; transition: none; }
+    *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
+  }
 
   .skeleton-ink { position: relative; background: var(--ink-soft); border: 1px solid var(--line); overflow: hidden; border-radius: var(--radius); }
   .skeleton-ink::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent 20%, rgba(244,242,237,0.07) 50%, transparent 80%); background-size: 200% 100%; animation: shimmerInk 1.5s infinite; }
@@ -263,9 +279,9 @@ const GLOBAL_CSS = `
   .scroll-x { overflow-x: auto; scrollbar-width: none; }
   .scroll-x::-webkit-scrollbar { display: none; }
   .stars { display: flex; gap: 2px; }
-  .star { font-size: 14px; cursor: pointer; transition: transform 0.18s var(--ease); color: var(--paper-dim); }
+  .star { font-size: 14px; cursor: pointer; transition: transform 0.18s var(--ease), color 0.18s; color: var(--paper-dim); }
   .star:hover { transform: scale(1.3); }
-  .star.lit { color: var(--paper); }
+  .star.lit { color: var(--jade-bright); }
 
   .seal-badge { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; background: var(--seal-dim); border: 1px solid var(--seal); border-radius: 99px; font-size: 9.5px; font-weight: 800; color: var(--seal-bright); letter-spacing: 0.1em; text-transform: uppercase; }
 
@@ -513,6 +529,36 @@ function useLocalStorage(key, initial) {
   return [val, set];
 }
 
+/* One shared IntersectionObserver for every .reveal element on the page
+   (instead of one observer per card) — cheap no matter how large the grid
+   gets. Attach a ref to any element and it fades/lifts in the first time it
+   enters the viewport, then is left alone. */
+let _revealObserver = null;
+function getRevealObserver() {
+  if (_revealObserver || typeof IntersectionObserver === "undefined") return _revealObserver;
+  _revealObserver = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (entry.isIntersecting) {
+        entry.target.classList.add("in-view");
+        _revealObserver.unobserve(entry.target);
+      }
+    }
+  }, { rootMargin: "0px 0px -8% 0px", threshold: 0.01 });
+  return _revealObserver;
+}
+function useReveal(delayMs = 0) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const el = ref.current; if (!el) return;
+    el.style.setProperty("--d", `${delayMs}ms`);
+    const obs = getRevealObserver();
+    if (!obs) { el.classList.add("in-view"); return; }
+    obs.observe(el);
+    return () => obs.unobserve(el);
+  }, [delayMs]);
+  return ref;
+}
+
 /* Standard dismiss behavior for any modal/drawer/popover: Escape key closes
    it, and — crucially for mobile — so does the device's physical/gesture
    back button. We do this by pushing a throwaway history entry the moment
@@ -564,7 +610,7 @@ function useClickOutside(ref, active, onClose) {
   }, [active]);
 }
 
-function LazyImg({src, alt, className, style}) {
+function LazyImg({src, alt, className, style, imgStyle, fillHeight}) {
   const ref = useRef();
   const [loaded, setLoaded] = useState(false);
   const [visible, setVisible] = useState(false);
@@ -573,11 +619,18 @@ function LazyImg({src, alt, className, style}) {
     const obs=new IntersectionObserver(([e])=>{if(e.isIntersecting){setVisible(true);obs.disconnect();}},{rootMargin:"200px"});
     obs.observe(el); return ()=>obs.disconnect();
   },[]);
+  // fillHeight: for images inside an already-sized absolute/flex box (e.g.
+  // the hero strip) that need height:100% + object-fit:cover instead of the
+  // default width:100%/height:auto (used for grid/detail covers, where the
+  // box's own aspect-ratio drives the layout).
+  const defaultImgStyle = fillHeight
+    ? {width:"100%",height:"100%",objectFit:"cover",display:"block"}
+    : {width:"100%",height:"auto",display:"block"};
   return (
-    <div ref={ref} style={{position:"relative",...style}}>
+    <div ref={ref} style={{position:"relative",overflow:"hidden",...style}}>
       {!loaded && <div className="skeleton-ink" style={{position:"absolute",inset:0}}/>}
       {visible && <img src={src} alt={alt} className={className} loading="lazy" decoding="async"
-        onLoad={()=>setLoaded(true)} style={{opacity:loaded?1:0,transition:"opacity 0.3s",width:"100%",height:"auto",display:"block"}}/>}
+        onLoad={()=>setLoaded(true)} style={{opacity:loaded?1:0,transition:"opacity 0.35s var(--ease)",...defaultImgStyle,...imgStyle}}/>}
     </div>
   );
 }
@@ -855,13 +908,12 @@ function AdminMusicManager({ musicLibrary, refetchMusic, toast }) {
 }
 
 
-function HomePage({library,libraryLoading,bookmarks,setBookmarks,toast,navigate}) {
+function HomePage({library,libraryLoading,bookmarks,setBookmarks,toast,navigate,mode="all"}) {
   const [search,setSearch]=useState("");
   const [filterGenre,setFilterGenre]=useState("");
   const [filterType,setFilterType]=useState("");
   const [filterStatus,setFilterStatus]=useState("");
   const [sortBy,setSortBy]=useState("popular");
-  const [activeTab,setActiveTab]=useState("all");
 
   const filtered = useMemo(()=>{
     let list=library.filter(m=>{
@@ -869,7 +921,7 @@ function HomePage({library,libraryLoading,bookmarks,setBookmarks,toast,navigate}
       if(filterGenre&&!m.genres.includes(filterGenre))return false;
       if(filterType&&m.type!==filterType)return false;
       if(filterStatus&&m.status!==filterStatus)return false;
-      if(activeTab==="bookmarked"&&!bookmarks.includes(m.id))return false;
+      if(mode==="bookmarked"&&!bookmarks.includes(m.id))return false;
       return true;
     });
     if(sortBy==="popular")list.sort((a,b)=>b.views-a.views);
@@ -877,18 +929,18 @@ function HomePage({library,libraryLoading,bookmarks,setBookmarks,toast,navigate}
     else if(sortBy==="newest")list.sort((a,b)=>b.id.localeCompare(a.id));
     else if(sortBy==="az")list.sort((a,b)=>a.title.localeCompare(b.title));
     return list;
-  },[library,search,filterGenre,filterType,filterStatus,sortBy,activeTab,bookmarks]);
+  },[library,search,filterGenre,filterType,filterStatus,mode,bookmarks]);
 
   return (
     <div style={{padding:"20px",maxWidth:1200,margin:"0 auto"}}>
-      <div style={{marginBottom:28,overflow:"hidden"}}>
+      {mode==="all"&&<div style={{marginBottom:28,overflow:"hidden"}}>
         <div className="scroll-x" style={{display:"flex",gap:12,paddingBottom:4}}>
           {library.slice(0,3).map((m)=>(
             <div key={m.id} onClick={()=>navigate(seriesPath(m))} className="ink-ripple halftone"
               style={{flexShrink:0,width:280,overflow:"hidden",position:"relative",cursor:"pointer",
                 background:"var(--ink-soft)",
                 border:"1px solid var(--line-strong)",minHeight:140,display:"flex",alignItems:"flex-end"}}>
-              <img src={m.cover} alt="" style={{position:"absolute",right:0,top:0,height:"100%",width:"50%",objectFit:"cover",opacity:0.5}} loading="lazy"/>
+              <LazyImg src={m.cover} alt="" fillHeight style={{position:"absolute",right:0,top:0,height:"100%",width:"50%"}} imgStyle={{opacity:0.5}}/>
               <div style={{position:"absolute",inset:0,background:"linear-gradient(to right, var(--ink) 30%, transparent 90%)"}}/>
               <div style={{padding:"16px",position:"relative",zIndex:1}}>
                 <span className="tag" style={{marginBottom:8}}>{m.type}</span>
@@ -898,15 +950,15 @@ function HomePage({library,libraryLoading,bookmarks,setBookmarks,toast,navigate}
             </div>
           ))}
         </div>
-      </div>
+      </div>}
 
       <div style={{display:"flex",gap:4,marginBottom:16,borderBottom:"1px solid var(--line)",paddingBottom:0}}>
-        {["all","bookmarked"].map(tab=>(
-          <button key={tab} onClick={()=>setActiveTab(tab)} style={{padding:"10px 16px",fontSize:12,fontWeight:700,letterSpacing:"0.04em",textTransform:"uppercase",
-            color:activeTab===tab?"var(--paper)":"var(--paper-faint)",
-            borderBottom:activeTab===tab?"2px solid var(--paper)":"2px solid transparent",cursor:"pointer"}}>
-            {tab==="all"?"All Series":"My Library"}
-            {tab==="bookmarked"&&bookmarks.length>0&&<span style={{marginLeft:6,border:"1px solid var(--line-strong)",borderRadius:99,padding:"1px 7px",fontSize:10}}>{bookmarks.length}</span>}
+        {[{key:"all",path:"/",label:"All Series"},{key:"bookmarked",path:"/library",label:"My Library"}].map(t=>(
+          <button key={t.key} onClick={()=>navigate(t.path)} style={{padding:"10px 16px",fontSize:12,fontWeight:700,letterSpacing:"0.04em",textTransform:"uppercase",
+            color:mode===t.key?"var(--paper)":"var(--paper-faint)",
+            borderBottom:mode===t.key?"2px solid var(--jade-bright)":"2px solid transparent",cursor:"pointer",transition:"color 0.2s, border-color 0.25s var(--ease)"}}>
+            {t.label}
+            {t.key==="bookmarked"&&bookmarks.length>0&&<span style={{marginLeft:6,border:"1px solid var(--jade)",color:"var(--jade-bright)",borderRadius:99,padding:"1px 7px",fontSize:10}}>{bookmarks.length}</span>}
           </button>
         ))}
       </div>
@@ -939,25 +991,26 @@ function HomePage({library,libraryLoading,bookmarks,setBookmarks,toast,navigate}
         </div>
       ):(
         <div className="manga-grid">
-          {filtered.map(m=><MangaCard key={m.id} manga={m} bookmarks={bookmarks} setBookmarks={setBookmarks} toast={toast} onClick={()=>navigate(seriesPath(m))}/>)}
+          {filtered.map((m,i)=><MangaCard key={m.id} manga={m} index={i} bookmarks={bookmarks} setBookmarks={setBookmarks} toast={toast} onClick={()=>navigate(seriesPath(m))}/>)}
         </div>
       )}
     </div>
   );
 }
 
-function MangaCard({manga,bookmarks,setBookmarks,toast,onClick}) {
+function MangaCard({manga,bookmarks,setBookmarks,toast,onClick,index=0}) {
   const isBookmarked=bookmarks.includes(manga.id);
   const [ctx,setCtx]=useState(null);
+  const revealRef=useReveal((index%12)*40);
   return (
-    <div className="card ink-ripple" style={{cursor:"pointer"}} onClick={onClick}
+    <div ref={revealRef} className="card ink-ripple reveal" style={{cursor:"pointer"}} onClick={onClick}
       onContextMenu={e=>{e.preventDefault();setCtx({x:e.clientX,y:e.clientY});}}>
       <div style={{position:"relative"}}>
         <LazyImg src={manga.cover} alt={manga.title} className="manga-cover" style={{aspectRatio:"2/3"}}/>
         <div style={{position:"absolute",inset:0,background:"linear-gradient(to top, rgba(10,10,10,0.95) 0%, transparent 60%)"}}/>
         <div style={{position:"absolute",top:8,left:8}}><span className="tag" style={{fontSize:9,padding:"2px 7px",background:"var(--ink)"}}>{manga.type}</span></div>
         <button onClick={e=>{e.stopPropagation();setBookmarks(b=>b.includes(manga.id)?b.filter(x=>x!==manga.id):[...b,manga.id]);toast(isBookmarked?"Removed from library":"Added to library","success");}}
-          style={{position:"absolute",top:8,right:8,background:isBookmarked?"var(--paper)":"rgba(0,0,0,0.55)",border:"1px solid var(--line-strong)",borderRadius:2,padding:"5px 8px",fontSize:13,cursor:"pointer",color:isBookmarked?"var(--ink)":"#fff",backdropFilter:"blur(4px)",fontWeight:700}}>
+          style={{position:"absolute",top:8,right:8,background:isBookmarked?"var(--jade-bright)":"rgba(0,0,0,0.55)",border:isBookmarked?"1px solid var(--jade-bright)":"1px solid var(--line-strong)",borderRadius:2,padding:"5px 8px",fontSize:13,cursor:"pointer",color:isBookmarked?"var(--ink)":"#fff",backdropFilter:"blur(4px)",fontWeight:700,transition:"background 0.2s var(--ease), transform 0.15s var(--ease), border-color 0.2s",transform:isBookmarked?"scale(1.05)":"scale(1)"}}>
           {isBookmarked?"✓":"+"}
         </button>
         <div style={{position:"absolute",bottom:38,left:10}}>
@@ -1003,7 +1056,7 @@ function DetailPage({manga,setManga,bookmarks,setBookmarks,toast,navigate,user,f
       <button className="btn btn-ghost btn-sm" onClick={()=>navigate("/")} style={{marginBottom:16}}>← Back</button>
       <div style={{display:"flex",gap:20,marginBottom:24,flexWrap:"wrap"}}>
         <div style={{flexShrink:0,width:140,overflow:"hidden",border:"1px solid var(--line-strong)"}}>
-          <img src={manga.cover} alt={manga.title} style={{width:"100%",display:"block"}} loading="lazy"/>
+          <LazyImg src={manga.cover} alt={manga.title} className="manga-cover" style={{aspectRatio:"2/3"}}/>
         </div>
         <div style={{flex:1,minWidth:200}}>
           <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
@@ -1775,7 +1828,7 @@ function ReaderPage({manga,chapterIdx,openComments,toast,navigate,onUpdateChapte
   return (
     <div style={{position:"fixed",inset:0,background:bgColor,display:"flex",flexDirection:"column",zIndex:500}}>
       <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:"rgba(244,242,237,0.1)",zIndex:10}}>
-        <div style={{height:"100%",width:`${progress}%`,background:"var(--paper)",transition:"width 0.1s"}}/>
+        <div style={{height:"100%",width:`${progress}%`,background:"linear-gradient(90deg, var(--jade), var(--jade-bright))",transition:"width 0.1s"}}/>
       </div>
       <div style={{position:"absolute",top:0,left:0,right:0,zIndex:9,background:"rgba(10,10,10,0.92)",backdropFilter:"blur(12px)",borderBottom:"1px solid var(--line)",padding:"10px 16px",display:"flex",alignItems:"center",gap:10,transform:showNav?"translateY(0)":"translateY(-100%)",transition:"transform 0.3s ease"}}>
         <button className="btn btn-ghost btn-sm btn-icon" onClick={()=>navigate(seriesPath(manga))}>←</button>
@@ -3153,17 +3206,23 @@ function ProfilePage({user,bookmarks,toast,signOut,navigate,onOpenFriends,incomi
       )}
 
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:1,border:"1px solid var(--line)",marginBottom:24}}>
-        {[{label:"Saved",val:bookmarks.length},{label:"Comments",val:0},{label:"Rating",val:"5★"}].map(s=>(
-          <div key={s.label} style={{padding:"18px",textAlign:"center",borderRight:"1px solid var(--line)"}}>
-            <div className="brush" style={{fontSize:22,fontWeight:800}}>{s.val}</div>
+        {[{label:"Saved",val:bookmarks.length,path:"/library"},{label:"Comments",val:0},{label:"Rating",val:"5★"}].map(s=>(
+          <div key={s.label} onClick={s.path?()=>navigate(s.path):undefined}
+            style={{padding:"18px",textAlign:"center",borderRight:"1px solid var(--line)",cursor:s.path?"pointer":"default",transition:"background 0.18s"}}
+            onMouseEnter={e=>{if(s.path)e.currentTarget.style.background="var(--wash)";}}
+            onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
+            <div className="brush" style={{fontSize:22,fontWeight:800,color:s.path?"var(--jade-bright)":"var(--paper)"}}>{s.val}</div>
             <div style={{fontSize:11,color:"var(--paper-faint)",letterSpacing:"0.05em",textTransform:"uppercase",marginTop:4}}>{s.label}</div>
           </div>
         ))}
       </div>
 
-      {user.isAdmin&&(
-        <button className="btn btn-primary" style={{width:"100%"}} onClick={()=>navigate("/admin")}>Open Admin Upload →</button>
-      )}
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        <button className="btn btn-ghost" style={{flex:1}} onClick={()=>navigate("/library")}>My Library →</button>
+        {user.isAdmin&&(
+          <button className="btn btn-primary" style={{flex:1}} onClick={()=>navigate("/admin")}>Open Admin Upload →</button>
+        )}
+      </div>
     </div>
   );
 }
@@ -3563,6 +3622,7 @@ function AppShell() {
 
   const navItems=[
     {path:"/",icon:"⌂",label:"Browse"},
+    {path:"/library",icon:"文",label:"Library"},
     {path:"/profile",icon:"☷",label:"Profile"},
     ...(user?.isAdmin?[{path:"/admin",icon:"✒",label:"Admin"}]:[]),
   ];
@@ -3590,7 +3650,10 @@ function AppShell() {
       <main className="main-content">
         <Routes>
           <Route path="/" element={
-            <HomePage library={library} libraryLoading={libraryLoading} bookmarks={bookmarks} setBookmarks={setBookmarks} toast={toast} navigate={navigate}/>
+            <HomePage library={library} libraryLoading={libraryLoading} bookmarks={bookmarks} setBookmarks={setBookmarks} toast={toast} navigate={navigate} mode="all"/>
+          }/>
+          <Route path="/library" element={
+            <HomePage library={library} libraryLoading={libraryLoading} bookmarks={bookmarks} setBookmarks={setBookmarks} toast={toast} navigate={navigate} mode="bookmarked"/>
           }/>
           <Route path="/series/:slug" element={
             <DetailRoute library={library} libraryLoading={libraryLoading} bookmarks={bookmarks} setBookmarks={setBookmarks} toast={toast} navigate={navigate} user={user} friends={social.friends} sendMessage={social.sendMessage} ensureSeriesDetail={ensureSeriesDetail}/>
