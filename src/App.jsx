@@ -363,8 +363,8 @@ const GLOBAL_CSS = `
      from the beat-detector rAF loop, no React re-renders) drives opacity so
      the shape visibly brightens on louder passages, not just distorts.
      Blur is also set inline (combined into that same filter string) rather
-     than here — an element's inline `style.filter` always wins over any
-     stylesheet `filter` rule for the same element, so a CSS-only blur here
+     than here — an element's inline style.filter always wins over any
+     stylesheet filter rule for the same element, so a CSS-only blur here
      would never actually apply on top of it. */
   .liquid-blob.liquid-favicon {
     object-fit: contain;
