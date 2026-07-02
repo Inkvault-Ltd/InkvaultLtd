@@ -1949,6 +1949,10 @@ function useSocial(user, toast) {
 const EMOTE_SET = ["👍","❤️","😂","😮","😢","🔥","🎉","😱"];
 const RTC_CONFIG = { iceServers: [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }] };
 
+// Canonical room id for a 1:1 call — sorted so both callers land on the same
+// `call-${id}` channel regardless of who dials whom.
+function dmRoomId(a, b) { return [a, b].sort().join("_"); }
+
 function useCallRoom(user, toast) {
   const [room, setRoom] = useState(null); // { id, label }
   const [peers, setPeers] = useState({}); // userId -> { username, muted, speaking }
@@ -2098,7 +2102,11 @@ function useCallRoom(user, toast) {
     channelRef.current?.send({ type: "broadcast", event: "emote", payload: { emoji, userId: user.id, username: user.username } });
   }, [room, user, pushEmote]);
 
-  useEffect(() => () => leaveCall(), []); // leave on unmount (e.g. sign out)
+  useEffect(() => () => leaveCall(), []); // leave on unmount
+
+  // Also hang up immediately if the user signs out mid-call (AppShell itself
+  // doesn't unmount on sign-out, so the effect above wouldn't fire).
+  useEffect(() => { if (!user && roomRef.current) leaveCall(); }, [user, leaveCall]);
 
   return { room, peers, muted, emotes, connecting, joinCall, leaveCall, toggleMute, sendEmote };
 }
@@ -2320,17 +2328,22 @@ function RecommendModal({ manga, friends, sendMessage, onClose, toast, navigate 
   );
 }
 
-function MessagesPage({ library, conversations, friends, user, toast, navigate, refetchConversations }) {
+function MessagesPage({ library, conversations, friends, groups, user, toast, navigate, refetchConversations, createGroup, sendGroupMessage, callRoom }) {
   const { userId } = useParams();
-  const activeId = userId || conversations[0]?.userId;
+  const [searchParams] = useSearchParams();
+  const groupId = searchParams.get("group");
+  const [showNewGroup, setShowNewGroup] = useState(false);
+
+  const activeId = !groupId ? (userId || (!groups?.length ? conversations[0]?.userId : undefined)) : null;
   const activeFriend = friends.find(f => f.id === activeId) || conversations.find(c => c.userId === activeId);
+  const activeGroup = groupId ? groups?.find(g => g.id === groupId) : null;
   const listedFriends = friends.filter(f => !conversations.some(c => c.userId === f.id));
 
   return (
     <div style={{ maxWidth: 900, margin: "0 auto", padding: "20px" }}>
       <div style={{ display: "flex", minHeight: "60vh", border: "1px solid var(--line)" }}>
         <div style={{ width: 220, flexShrink: 0, borderRight: "1px solid var(--line)", overflowY: "auto" }}>
-          {conversations.length === 0 && listedFriends.length === 0 && <div style={{ padding: 16, fontSize: 12, color: "var(--paper-faint)" }}>No conversations yet. Add friends to start messaging.</div>}
+          {conversations.length === 0 && listedFriends.length === 0 && (!groups || groups.length === 0) && <div style={{ padding: 16, fontSize: 12, color: "var(--paper-faint)" }}>No conversations yet. Add friends to start messaging.</div>}
           {listedFriends.map(f => (
             <div key={f.id} onClick={() => navigate(`/messages/${f.id}`)} style={{ padding: "12px 14px", cursor: "pointer", borderBottom: "1px solid var(--line)", background: activeId === f.id ? "var(--wash)" : "transparent" }}>
               <div style={{ fontSize: 13, fontWeight: 600 }}>{f.username}</div>
@@ -2346,20 +2359,161 @@ function MessagesPage({ library, conversations, friends, user, toast, navigate, 
               <div style={{ fontSize: 11, color: "var(--paper-faint)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.lastMessage.share_series_title ? `Shared: ${c.lastMessage.share_series_title}` : (c.lastMessage.text || "")}</div>
             </div>
           ))}
+          {groups && (
+            <>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px 6px" }}>
+                <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--paper-faint)" }}>Groups</span>
+                <button className="btn btn-ghost btn-sm btn-icon" onClick={() => setShowNewGroup(true)} title="New group" aria-label="New group">+</button>
+              </div>
+              {groups.map(g => (
+                <div key={g.id} className="group-row" onClick={() => navigate(`/messages?group=${g.id}`)} style={{ background: activeGroup?.id === g.id ? "var(--wash)" : "transparent" }}>
+                  <div className="group-row-avatar">{(g.name || "?").slice(0, 2).toUpperCase()}</div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.name}</div>
+                    <div style={{ fontSize: 11, color: "var(--paper-faint)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.lastMessage ? g.lastMessage.text : `${g.members.length} members`}</div>
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
         </div>
         <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-          {activeId ? (
-            <ConversationThread library={library} otherId={activeId} otherUsername={activeFriend?.username || "User"} user={user} toast={toast} navigate={navigate} refetchConversations={refetchConversations} />
+          {activeGroup ? (
+            <GroupThread group={activeGroup} user={user} toast={toast} sendGroupMessage={sendGroupMessage} callRoom={callRoom} />
+          ) : activeId ? (
+            <ConversationThread library={library} otherId={activeId} otherUsername={activeFriend?.username || "User"} user={user} toast={toast} navigate={navigate} refetchConversations={refetchConversations} callRoom={callRoom} />
           ) : (
             <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--paper-faint)", fontSize: 13 }}>Select a conversation</div>
           )}
+        </div>
+      </div>
+      {showNewGroup && (
+        <NewGroupModal friends={friends} onClose={() => setShowNewGroup(false)}
+          onCreate={async (name, memberIds) => {
+            const id = await createGroup(name, memberIds);
+            if (id) { setShowNewGroup(false); navigate(`/messages?group=${id}`); }
+          }} />
+      )}
+    </div>
+  );
+}
+
+function GroupThread({ group, user, toast, sendGroupMessage, callRoom }) {
+  const [messages, setMessages] = useState([]);
+  const [text, setText] = useState("");
+  const bottomRef = useRef(null);
+
+  const fetchThread = useCallback(async () => {
+    const { data, error } = await supabase.from("group_messages").select("*").eq("group_id", group.id).order("created_at", { ascending: true });
+    if (error) { console.error(error); return; }
+    setMessages(data || []);
+  }, [group.id]);
+
+  useEffect(() => { fetchThread(); }, [fetchThread]);
+
+  useEffect(() => {
+    const channel = supabase.channel(`group-thread-${group.id}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "group_messages", filter: `group_id=eq.${group.id}` }, payload => {
+        setMessages(prev => prev.some(m => m.id === payload.new.id) ? prev : [...prev, payload.new]);
+      }).subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [group.id]);
+
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+
+  const send = async () => {
+    if (!text.trim()) return;
+    const t = text.trim();
+    setText("");
+    await sendGroupMessage(group.id, t);
+  };
+
+  const inCall = callRoom?.room?.id === group.id;
+
+  return (
+    <>
+      <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 14 }}>{group.name}</div>
+          <div style={{ fontSize: 11, color: "var(--paper-faint)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{group.members.map(m => m.username).join(", ")}</div>
+        </div>
+        {callRoom && (
+          <button className={`btn btn-sm ${inCall ? "btn-primary" : "btn-ghost"}`}
+            onClick={() => inCall ? callRoom.leaveCall() : callRoom.joinCall(group.id, group.name)}
+            title={inCall ? "Leave group call" : "Start group call"}>
+            {inCall ? "☎ In call" : "☎ Call"}
+          </button>
+        )}
+      </div>
+      <div style={{ flex: 1, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+        {messages.map(m => {
+          const mine = m.sender_id === user.id;
+          const sender = group.members.find(mm => mm.id === m.sender_id);
+          return (
+            <div key={m.id} style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "75%" }}>
+              {!mine && <div style={{ fontSize: 10, color: "var(--paper-faint)", marginBottom: 2 }}>{sender?.username || "Member"}</div>}
+              <div style={{ padding: "8px 12px", borderRadius: "var(--radius)", fontSize: 13, background: mine ? "var(--ink-raised)" : "var(--wash)", border: "1px solid var(--line)" }}>{m.text}</div>
+              <div style={{ fontSize: 10, color: "var(--paper-faint)", marginTop: 3, textAlign: mine ? "right" : "left" }}>{new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
+            </div>
+          );
+        })}
+        <div ref={bottomRef} />
+      </div>
+      <div style={{ display: "flex", gap: 8, padding: 14, borderTop: "1px solid var(--line)" }}>
+        <input className="input" placeholder="Message…" value={text} onChange={e => setText(e.target.value)} onKeyDown={e => e.key === "Enter" && send()} style={{ flex: 1 }} />
+        <button className="btn btn-primary btn-sm" onClick={send}>Send</button>
+      </div>
+    </>
+  );
+}
+
+function NewGroupModal({ friends, onClose, onCreate }) {
+  const [name, setName] = useState("");
+  const [selected, setSelected] = useState([]);
+  const [creating, setCreating] = useState(false);
+  useDismissable(true, onClose);
+
+  const toggle = (id) => setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+
+  const submit = async () => {
+    if (!name.trim() || !selected.length || creating) return;
+    setCreating(true);
+    await onCreate(name, selected);
+    setCreating(false);
+  };
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ maxWidth: 400 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <h2 className="brush" style={{ fontSize: 18, fontWeight: 800 }}>New Group</h2>
+          <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
+        </div>
+        <input className="input" placeholder="Group name" value={name} onChange={e => setName(e.target.value)} style={{ marginBottom: 16 }} autoFocus />
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--paper-faint)", marginBottom: 8 }}>Add friends</div>
+        {friends.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "20px 0", color: "var(--paper-faint)", fontSize: 13 }}>You don't have any friends yet.</div>
+        ) : (
+          <div style={{ maxHeight: 240, overflowY: "auto", marginBottom: 16 }}>
+            {friends.map(f => (
+              <div key={f.id} onClick={() => toggle(f.id)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid var(--line)", cursor: "pointer" }}>
+                <input type="checkbox" checked={selected.includes(f.id)} onChange={() => toggle(f.id)} style={{ accentColor: "var(--paper)" }} />
+                <div className="avatar" style={{ width: 26, height: 26, fontSize: 10 }}>{f.username.slice(0, 2).toUpperCase()}</div>
+                <div style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>{f.username}</div>
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button className="btn btn-ghost btn-sm" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary btn-sm" disabled={!name.trim() || !selected.length || creating} onClick={submit}>{creating ? "Creating…" : "Create group"}</button>
         </div>
       </div>
     </div>
   );
 }
 
-function ConversationThread({ library, otherId, otherUsername, user, toast, navigate, refetchConversations }) {
+function ConversationThread({ library, otherId, otherUsername, user, toast, navigate, refetchConversations, callRoom }) {
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
   const bottomRef = useRef(null);
@@ -2399,9 +2553,21 @@ function ConversationThread({ library, otherId, otherUsername, user, toast, navi
     await supabase.from("notifications").insert({ user_id: otherId, actor_id: user.id, type: "message", data: { username: user.username } });
   };
 
+  const callId = dmRoomId(user.id, otherId);
+  const inCall = callRoom?.room?.id === callId;
+
   return (
     <>
-      <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--line)", fontWeight: 700, fontSize: 14 }}>{otherUsername}</div>
+      <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ fontWeight: 700, fontSize: 14 }}>{otherUsername}</div>
+        {callRoom && (
+          <button className={`btn btn-sm ${inCall ? "btn-primary" : "btn-ghost"}`}
+            onClick={() => inCall ? callRoom.leaveCall() : callRoom.joinCall(callId, otherUsername)}
+            title={inCall ? "Leave call" : `Call ${otherUsername}`}>
+            {inCall ? "☎ In call" : "☎ Call"}
+          </button>
+        )}
+      </div>
       <div style={{ flex: 1, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
         {messages.map(m => {
           const sharedManga = m.share_series_id ? library.find(s => s.id === m.share_series_id) : null;
@@ -2435,7 +2601,7 @@ function ConversationThread({ library, otherId, otherUsername, user, toast, navi
    comment drawer that opens in place (no losing your reading position).
    ========================================================================== */
 
-function ReaderPage({manga,chapterIdx,openComments,toast,navigate,onUpdateChapterComments,user,friends}) {
+function ReaderPage({manga,chapterIdx,openComments,toast,navigate,onUpdateChapterComments,user,friends,callRoom}) {
   const chapter=manga.chapters[chapterIdx];
   const pages = chapter.pages;
   const chapterCommentCount = chapter.commentCount ?? chapter.comments?.length ?? 0;
@@ -2503,6 +2669,13 @@ function ReaderPage({manga,chapterIdx,openComments,toast,navigate,onUpdateChapte
 
    
 
+  const inCallHere = callRoom?.room?.id === manga.id;
+  const toggleReadTogether = () => {
+    if (!callRoom) return;
+    if (inCallHere) callRoom.leaveCall();
+    else callRoom.joinCall(manga.id, `${manga.title} · read together`);
+  };
+
   return (
     <div style={{position:"fixed",inset:0,background:bgColor,display:"flex",flexDirection:"column",zIndex:500}}>
       <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:"rgba(255,228,225,0.1)",zIndex:10}}>
@@ -2565,6 +2738,14 @@ function ReaderPage({manga,chapterIdx,openComments,toast,navigate,onUpdateChapte
       {/* Floating quote button — same show/hide rhythm as the nav bars */}
       <button className="quote-fab" style={{opacity:showNav?1:0,transform:showNav?"translateY(0)":"translateY(8px)"}} onClick={captureQuote}>
         ✎ Quote this page
+      </button>
+
+      {/* Floating "read together" call button — always visible so a call
+          started elsewhere in the series stays reachable while reading. */}
+      <button className={`call-fab ${inCallHere?"active":""}`} onClick={toggleReadTogether}
+        title={inCallHere?"Leave read-together call":"Start a read-together voice call"}
+        aria-label={inCallHere?"Leave call":"Start read-together call"}>
+        {inCallHere?"☎":"🎙"}
       </button>
 
       {/* Floating comment button — always visible (not tied to showNav) so
@@ -3944,7 +4125,7 @@ function DetailRoute({library, libraryLoading, bookmarks, setBookmarks, toast, n
 
 // Route wrapper for /series/:slug/read/:chapterIdx (1-based in the URL,
 // converted to a 0-based array index for the chapters array).
-function ReaderRoute({library, libraryLoading, toast, navigate, onUpdateChapterComments, user, friends, ensureSeriesDetail}) {
+function ReaderRoute({library, libraryLoading, toast, navigate, onUpdateChapterComments, user, friends, ensureSeriesDetail, callRoom}) {
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const match = location.pathname.match(/^\/series\/([^/]+)\/read\/(\d+)$/);
@@ -3978,7 +4159,7 @@ function ReaderRoute({library, libraryLoading, toast, navigate, onUpdateChapterC
     return <FullscreenInkLoader/>;
   }
   return <ReaderPage manga={manga} chapterIdx={idx} openComments={searchParams.get("comments")==="1"}
-    toast={toast} navigate={navigate} onUpdateChapterComments={onUpdateChapterComments} user={user} friends={friends}/>;
+    toast={toast} navigate={navigate} onUpdateChapterComments={onUpdateChapterComments} user={user} friends={friends} callRoom={callRoom}/>;
 }
 
 const isReaderPath = (pathname) => /^\/series\/[^/]+\/read\/\d+$/.test(pathname);
@@ -4213,6 +4394,7 @@ function AppShell() {
 
   const social = useSocial(user, toast);
   const [showFriends,setShowFriends]=useState(false);
+  const callRoom = useCallRoom(user, toast);
 
   const handleNotificationClick = useCallback((n) => {
     if (n.type === "friend_request" || n.type === "friend_accept") { setShowFriends(true); return; }
@@ -4299,8 +4481,10 @@ function AppShell() {
   if (isReaderPath(location.pathname)) {
     return <>
       <ReaderRoute library={library} libraryLoading={libraryLoading} toast={toast} navigate={navigate}
-        onUpdateChapterComments={updateChapterComments} user={user} friends={social.friends} ensureSeriesDetail={ensureSeriesDetail}/>
+        onUpdateChapterComments={updateChapterComments} user={user} friends={social.friends} ensureSeriesDetail={ensureSeriesDetail} callRoom={callRoom}/>
       <NowPlayingCard track={nowPlayingTrack} trackNum={musicTrackNum} trackCount={musicTrackCount} onClose={dismissNowPlaying} onNext={nextTrack} onPrev={prevTrack} onHold={holdMusicCard} onRelease={releaseMusicCard}/>
+      <CallBar callRoom={callRoom} user={user}/>
+      <EmoteFlyingLayer emotes={callRoom.emotes}/>
       <ToastContainer toasts={toasts}/>
     </>;
   }
@@ -4355,7 +4539,7 @@ function AppShell() {
             )
           }/>
           <Route path="/messages" element={
-            user?<MessagesPage library={library} conversations={social.conversations} friends={social.friends} user={user} toast={toast} navigate={navigate} refetchConversations={social.refetchConversations}/>:(
+            user?<MessagesPage library={library} conversations={social.conversations} friends={social.friends} groups={social.groups} createGroup={social.createGroup} sendGroupMessage={social.sendGroupMessage} user={user} toast={toast} navigate={navigate} refetchConversations={social.refetchConversations} callRoom={callRoom}/>:(
               <div style={{textAlign:"center",padding:"80px 20px"}}>
                 <div className="brush" style={{fontSize:36,marginBottom:14}}>人</div>
                 <div className="brush" style={{fontSize:20,fontWeight:800,marginBottom:8}}>Not signed in</div>
@@ -4364,7 +4548,7 @@ function AppShell() {
             )
           }/>
           <Route path="/messages/:userId" element={
-            user?<MessagesPage library={library} conversations={social.conversations} friends={social.friends} user={user} toast={toast} navigate={navigate} refetchConversations={social.refetchConversations}/>:(
+            user?<MessagesPage library={library} conversations={social.conversations} friends={social.friends} groups={social.groups} createGroup={social.createGroup} sendGroupMessage={social.sendGroupMessage} user={user} toast={toast} navigate={navigate} refetchConversations={social.refetchConversations} callRoom={callRoom}/>:(
               <div style={{textAlign:"center",padding:"80px 20px"}}>
                 <div className="brush" style={{fontSize:36,marginBottom:14}}>人</div>
                 <div className="brush" style={{fontSize:20,fontWeight:800,marginBottom:8}}>Not signed in</div>
@@ -4400,6 +4584,8 @@ function AppShell() {
       {showAuth&&<AuthModal toast={toast} onClose={()=>setShowAuth(false)} onLogin={async (authUser)=>{await loadProfile(authUser);toast(`Welcome back`, "success");}}/>}
       {showFriends&&user&&<FriendsModal onClose={()=>setShowFriends(false)} friends={social.friends} incoming={social.incoming} outgoing={social.outgoing} searchUsers={social.searchUsers} sendFriendRequest={social.sendFriendRequest} respondToRequest={social.respondToRequest} removeFriend={social.removeFriend} navigate={navigate}/>}
       <NowPlayingCard track={nowPlayingTrack} trackNum={musicTrackNum} trackCount={musicTrackCount} onClose={dismissNowPlaying} onNext={nextTrack} onPrev={prevTrack} onHold={holdMusicCard} onRelease={releaseMusicCard}/>
+      <CallBar callRoom={callRoom} user={user}/>
+      <EmoteFlyingLayer emotes={callRoom.emotes}/>
       <ToastContainer toasts={toasts}/>
     </div>
   );
