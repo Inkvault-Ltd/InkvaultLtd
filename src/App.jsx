@@ -326,6 +326,28 @@ const GLOBAL_CSS = `
   .quote-fab:hover { transform: scale(1.05); }
   @media (min-width: 768px) { .quote-fab { bottom: 28px; } }
 
+  /* ---- floating comment/discussion button in reader ----
+     Deliberately NOT tied to the auto-hiding nav bars: comments should
+     always be reachable, even mid-scroll, not just for the few seconds
+     the chrome happens to be visible. */
+  .comment-fab {
+    position: fixed; z-index: 60; left: 16px; bottom: 84px;
+    display: flex; align-items: center; justify-content: center;
+    width: 52px; height: 52px; border-radius: 50%;
+    background: var(--ink-raised); color: var(--paper); border: 1px solid var(--line-strong);
+    font-size: 21px; box-shadow: var(--shadow-3);
+    transition: transform 0.2s var(--ease), background 0.2s var(--ease);
+  }
+  .comment-fab:hover { transform: scale(1.07); background: var(--ink-soft); }
+  .comment-fab:active { transform: scale(0.96); }
+  .comment-fab-badge {
+    position: absolute; top: -4px; right: -4px; min-width: 19px; height: 19px; padding: 0 5px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--seal-bright); color: #fff; border-radius: 99px;
+    font-size: 10.5px; font-weight: 800; border: 1.5px solid var(--ink);
+  }
+  @media (min-width: 768px) { .comment-fab { bottom: 28px; } }
+
   /* ---- ink splash arrival overlay (plays over a jumped-to page) ---- */
   .splash-arrival { position: absolute; inset: 0; pointer-events: none; display: flex; align-items: center; justify-content: center; z-index: 10; overflow: hidden; }
 
@@ -1344,7 +1366,13 @@ function DetailPage({manga,setManga,bookmarks,setBookmarks,toast,navigate,user,f
     navigate(seriesPath(manga, `/read/${chapterNumber}${opts.openComments?"?comments=1":""}`));
   };
 
-  const totalComments = manga.chapters.reduce((sum,c)=>sum+(c.comments?.length||0),0);
+  // Chapters start as lightweight stubs with an empty `comments` array and a
+  // separate `commentCount` from the count aggregate; once the full series
+  // detail loads, `comments` is the real array and `commentCount` is gone.
+  // Falling back through both means the number is correct in either state
+  // instead of flashing (or getting stuck at) 0.
+  const chapterCommentCount = (c) => c.commentCount ?? c.comments?.length ?? 0;
+  const totalComments = manga.chapters.reduce((sum,c)=>sum+chapterCommentCount(c),0);
 
   return (
     <div style={{maxWidth:900,margin:"0 auto",padding:"20px"}}>
@@ -1395,7 +1423,7 @@ function DetailPage({manga,setManga,bookmarks,setBookmarks,toast,navigate,user,f
           {[...manga.chapters].reverse().map((ch,ri)=>{
             const idx=manga.chapters.length-1-ri;
             const isRead=readChapters.includes(ch.id);
-            const commentCount = ch.comments?.length || 0;
+            const commentCount = chapterCommentCount(ch);
             return <div key={ch.id} className={`chapter-item ${isRead?"read":""}`}>
               <div style={{flex:1,cursor:"pointer"}} onClick={()=>{setReadChapters(r=>r.includes(ch.id)?r:[...r,ch.id]);startReading(idx);}}>
                 <div style={{fontWeight:600,fontSize:14}}>{ch.title}</div>
@@ -2056,6 +2084,7 @@ function ConversationThread({ library, otherId, otherUsername, user, toast, navi
 function ReaderPage({manga,chapterIdx,openComments,toast,navigate,onUpdateChapterComments,user,friends}) {
   const chapter=manga.chapters[chapterIdx];
   const pages = chapter.pages;
+  const chapterCommentCount = chapter.commentCount ?? chapter.comments?.length ?? 0;
   const [progress,setProgress]=useState(0);
   const [showNav,setShowNav]=useState(true);
   const [showSettings,setShowSettings]=useState(false);
@@ -2170,7 +2199,6 @@ function ReaderPage({manga,chapterIdx,openComments,toast,navigate,onUpdateChapte
         <button className="btn btn-ghost btn-sm" onClick={()=>goChapter(-1)}>← Prev</button>
         <div style={{flex:1,textAlign:"center",fontSize:12,color:"var(--paper-faint)"}}>Ch.{chapter.number} · {Math.round(progress)}%</div>
         <button className="btn btn-primary btn-sm" onClick={()=>goChapter(1)}>Next →</button>
-        <button className="btn btn-ghost btn-sm btn-icon" onClick={()=>setShowComments(true)} title="Discussion" aria-label="Open comments">💬</button>
       </div>
       <div className="panel-nav" style={{opacity:showNav?1:0.15}}>
         {pages.slice(0,20).map((_,i)=>{
@@ -2183,6 +2211,14 @@ function ReaderPage({manga,chapterIdx,openComments,toast,navigate,onUpdateChapte
       {/* Floating quote button — same show/hide rhythm as the nav bars */}
       <button className="quote-fab" style={{opacity:showNav?1:0,transform:showNav?"translateY(0)":"translateY(8px)"}} onClick={captureQuote}>
         ✎ Quote this page
+      </button>
+
+      {/* Floating comment button — always visible (not tied to showNav) so
+          discussion stays reachable while actively reading/scrolling, not
+          just during the few seconds the nav chrome happens to be shown. */}
+      <button className="comment-fab" onClick={()=>setShowComments(true)} title="Discussion" aria-label={`Open comments${chapterCommentCount?`, ${chapterCommentCount} comments`:""}`}>
+        💬
+        {chapterCommentCount>0 && <span className="comment-fab-badge">{chapterCommentCount>99?"99+":chapterCommentCount}</span>}
       </button>
 
       {showComments && (
