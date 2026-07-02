@@ -100,41 +100,44 @@ const GLOBAL_CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@500;600;700;800&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap');
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
   :root {
-    --ink: #0A0A0A; --ink-soft: #141414; --ink-raised: #1C1C1C; --ink-deep: #050505;
-    --paper: #F4F2ED; --paper-dim: #ACA89C; --paper-faint: #66635A;
-    --line: rgba(244,242,237,0.10); --line-strong: rgba(244,242,237,0.22); --line-bright: rgba(244,242,237,0.4);
-    --wash: rgba(244,242,237,0.045);
-    --seal: #C8312A; --seal-bright: #E64A3F; --seal-dim: rgba(200,49,42,0.16);
-    /* jade — the seal's complement on the wheel (warm vermillion / cool
-       jade-teal), the classic ink-and-seal pairing. Used sparingly as the
-       "alive" accent (active states, links, ratings) so the app stays
-       mostly monochrome but never flat. */
-    --jade: #3E8E7E; --jade-bright: #55B4A0; --jade-dim: rgba(62,142,126,0.16);
-    --ok: #F4F2ED; --warn: #D9A04B;
+    /* ---- Neon Webtoon palette: a violet-black base (not flat black) so
+       the vibrant accents have somewhere to glow, plus a hot-magenta /
+       electric-cyan complementary pair as the "alive" colors — this is the
+       set the whole liquid-reactive layer and CTAs are built from. ---- */
+    --ink: #0B0616; --ink-soft: #160C29; --ink-raised: #22133D; --ink-deep: #050310;
+    --paper: #F6F1FF; --paper-dim: #B7A9DE; --paper-faint: #6C5D95;
+    --line: rgba(246,241,255,0.10); --line-strong: rgba(246,241,255,0.22); --line-bright: rgba(246,241,255,0.4);
+    --wash: rgba(246,241,255,0.05);
+    --seal: #FF2E7E; --seal-bright: #FF6BA6; --seal-dim: rgba(255,46,126,0.18);
+    /* jade — now electric cyan, the magenta's complement on the wheel.
+       Used for "alive" states (active nav, ratings, bookmarks, progress)
+       so the app reads as two vivid colors in conversation, not one. */
+    --jade: #14E4C4; --jade-bright: #59FFE0; --jade-dim: rgba(20,228,196,0.18);
+    --ok: #F6F1FF; --warn: #FFB020;
     --radius: 3px; --radius-lg: 6px;
     --ease: cubic-bezier(.16,.84,.32,1);
     --shadow-1: 0 1px 2px rgba(0,0,0,0.4);
     --shadow-2: 0 8px 24px rgba(0,0,0,0.45);
     --shadow-3: 0 20px 50px rgba(0,0,0,0.55);
 
-    /* ---- ink-wash gradients: one monochrome material language, reused
-       everywhere instead of flat fills, so the whole app reads like surfaces
-       catching raking light rather than scattered one-off effects. ---- */
+    /* ---- gradients: dark violet surfaces catching magenta/cyan light
+       instead of flat fills, reused everywhere so the whole app reads as
+       one material language. ---- */
     --grad-canvas:
-      radial-gradient(120% 70% at 10% -10%, rgba(244,242,237,0.06), transparent 55%),
-      radial-gradient(100% 60% at 105% 0%, rgba(244,242,237,0.035), transparent 50%),
-      radial-gradient(90% 60% at 50% 115%, rgba(0,0,0,0.5), transparent 60%),
+      radial-gradient(120% 70% at 10% -10%, rgba(255,46,126,0.10), transparent 55%),
+      radial-gradient(100% 60% at 105% 0%, rgba(20,228,196,0.08), transparent 50%),
+      radial-gradient(90% 60% at 50% 115%, rgba(0,0,0,0.55), transparent 60%),
       var(--ink);
     --grad-surface: linear-gradient(155deg, var(--ink-soft) 0%, var(--ink-raised) 55%, var(--ink-deep) 130%);
-    --grad-surface-hover: linear-gradient(155deg, var(--ink-raised) 0%, #232323 50%, var(--ink-soft) 130%);
-    --grad-sheen: linear-gradient(115deg, transparent 38%, rgba(244,242,237,0.16) 50%, transparent 62%);
-    --grad-bloom: radial-gradient(60% 60% at 28% 18%, rgba(244,242,237,0.14), transparent 72%);
-    --grad-paper: linear-gradient(135deg, #FFFFFF 0%, var(--paper) 55%, #DCD8CC 130%);
-    --grad-paper-hover: linear-gradient(135deg, var(--paper) 0%, #EDEAE1 100%);
+    --grad-surface-hover: linear-gradient(155deg, var(--ink-raised) 0%, #33184F 50%, var(--ink-soft) 130%);
+    --grad-sheen: linear-gradient(115deg, transparent 38%, rgba(246,241,255,0.18) 50%, transparent 62%);
+    --grad-bloom: radial-gradient(60% 60% at 28% 18%, rgba(255,46,126,0.20), transparent 72%);
+    --grad-paper: linear-gradient(135deg, var(--seal-bright) 0%, var(--seal) 60%, #B0177E 130%);
+    --grad-paper-hover: linear-gradient(135deg, #FF8CBE 0%, var(--seal-bright) 100%);
     --grad-line: linear-gradient(90deg, transparent, var(--line-bright) 50%, transparent);
-    --grad-ring: conic-gradient(from 210deg, rgba(244,242,237,0.5), rgba(244,242,237,0.04) 30%, rgba(244,242,237,0.4) 65%, rgba(244,242,237,0.04) 85%, rgba(244,242,237,0.5));
-    --grad-glass: linear-gradient(180deg, rgba(20,20,20,0.95), rgba(5,5,5,0.86));
-    --grad-edge: linear-gradient(180deg, rgba(244,242,237,0.07), transparent);
+    --grad-ring: conic-gradient(from 210deg, rgba(255,46,126,0.55), rgba(20,228,196,0.05) 30%, rgba(20,228,196,0.5) 65%, rgba(255,46,126,0.05) 85%, rgba(255,46,126,0.55));
+    --grad-glass: linear-gradient(180deg, rgba(22,12,41,0.95), rgba(5,3,16,0.86));
+    --grad-edge: linear-gradient(180deg, rgba(246,241,255,0.08), transparent);
   }
   html { scroll-behavior: smooth; }
   body {
@@ -146,7 +149,7 @@ const GLOBAL_CSS = `
      enough to read as "polish" rather than noise. */
   body::before {
     content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none;
-    background-image: radial-gradient(circle, rgba(244,242,237,0.5) 0.5px, transparent 0.5px);
+    background-image: radial-gradient(circle, rgba(246,241,255,0.5) 0.5px, transparent 0.5px);
     background-size: 4px 4px; opacity: 0.4; mix-blend-mode: overlay;
   }
   #root, body > div { position: relative; z-index: 1; }
@@ -188,7 +191,7 @@ const GLOBAL_CSS = `
   }
 
   .skeleton-ink { position: relative; background: var(--ink-soft); border: 1px solid var(--line); overflow: hidden; border-radius: var(--radius); }
-  .skeleton-ink::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent 20%, rgba(244,242,237,0.07) 50%, transparent 80%); background-size: 200% 100%; animation: shimmerInk 1.5s infinite; }
+  .skeleton-ink::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent 20%, rgba(246,241,255,0.07) 50%, transparent 80%); background-size: 200% 100%; animation: shimmerInk 1.5s infinite; }
 
   .ink-ripple { position: relative; overflow: hidden; }
   .ink-ripple::after { content: ''; position: absolute; border-radius: 50%; background: var(--wash); width: 10px; height: 10px; top: 50%; left: 50%; transform: translate(-50%,-50%) scale(0); transition: transform 0.5s, opacity 0.5s; opacity: 0; }
@@ -200,16 +203,16 @@ const GLOBAL_CSS = `
   .tag.active { background: var(--paper); border-color: var(--paper); color: var(--ink); }
 
   .btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 11px 22px; border-radius: var(--radius); font-size: 12.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; transition: all 0.18s var(--ease); border: 1px solid transparent; position: relative; overflow: hidden; }
-  .btn-primary { background: var(--grad-paper); color: var(--ink); border-color: var(--paper); box-shadow: var(--shadow-1); }
+  .btn-primary { background: var(--grad-paper); color: var(--paper); border-color: var(--seal-bright); box-shadow: 0 6px 18px rgba(255,46,126,0.35); }
   .btn-primary::before { content: ''; position: absolute; inset: 0; background: var(--grad-sheen); transform: translateX(-120%); transition: transform 0.55s var(--ease); pointer-events: none; }
   .btn-primary:hover::before { transform: translateX(120%); }
-  .btn-primary:hover { background: var(--grad-surface-hover); color: var(--paper); border-color: var(--paper); transform: translateY(-1px); box-shadow: var(--shadow-2); }
+  .btn-primary:hover { background: var(--grad-paper-hover); color: var(--paper); border-color: var(--jade-bright); transform: translateY(-1px); box-shadow: 0 8px 26px rgba(255,46,126,0.45); }
   .btn-primary:active { transform: translateY(0); }
   .btn-ghost { background: transparent; color: var(--paper-dim); border: 1px solid var(--line-strong); }
   .btn-ghost:hover { border-color: var(--paper); color: var(--paper); background: var(--wash); }
   .btn-danger { background: transparent; color: var(--seal-bright); border: 1px solid var(--seal-dim); }
   .btn-danger:hover { background: var(--seal-dim); border-color: var(--seal); }
-  .btn-seal { background: linear-gradient(135deg, var(--seal-bright), var(--seal) 65%, #8A211C 135%); color: var(--paper); border-color: var(--seal); box-shadow: 0 6px 18px rgba(200,49,42,0.35); }
+  .btn-seal { background: linear-gradient(135deg, var(--seal-bright), var(--seal) 65%, #7A0F52 135%); color: var(--paper); border-color: var(--seal); box-shadow: 0 6px 18px rgba(255,46,126,0.35); }
   .btn-seal::before { content: ''; position: absolute; inset: 0; background: var(--grad-sheen); transform: translateX(-120%); transition: transform 0.55s var(--ease); pointer-events: none; }
   .btn-seal:hover::before { transform: translateX(120%); }
   .btn-seal:hover { background: linear-gradient(135deg, var(--seal-bright), var(--seal) 80%); transform: translateY(-1px); }
@@ -236,7 +239,7 @@ const GLOBAL_CSS = `
   .drawer { background: var(--ink-soft); border-left: 1px solid var(--line-strong); width: 100%; max-width: 420px; height: 100%; overflow-y: auto; animation: fadeUp 0.28s var(--ease); padding: 24px; box-shadow: var(--shadow-3); }
   @media (max-width: 640px) { .drawer { max-width: 100%; } }
 
-  .nav { position: sticky; top: 0; z-index: 100; background: rgba(10,10,10,0.86); backdrop-filter: blur(16px) saturate(140%); border-bottom: 1px solid var(--line); padding: 0 20px; height: 60px; display: flex; align-items: center; gap: 12px; }
+  .nav { position: sticky; top: 0; z-index: 100; background: rgba(11,6,22,0.86); backdrop-filter: blur(16px) saturate(140%); border-bottom: 1px solid var(--line); padding: 0 20px; height: 60px; display: flex; align-items: center; gap: 12px; }
 
   .manga-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 16px; }
   @media (min-width: 600px) { .manga-grid { grid-template-columns: repeat(auto-fill, minmax(162px, 1fr)); gap: 18px; } }
@@ -268,11 +271,13 @@ const GLOBAL_CSS = `
   .dropzone { border: 1.5px dashed var(--line-strong); border-radius: var(--radius-lg); padding: 34px; text-align: center; cursor: pointer; transition: all 0.2s; }
   .dropzone:hover, .dropzone.dragover { border-color: var(--paper); background: var(--wash); }
 
-  .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; background: rgba(10,10,10,0.92); backdrop-filter: blur(14px); border-top: 1px solid var(--line); display: flex; z-index: 100; padding-bottom: env(safe-area-inset-bottom); }
-  .bottom-nav-item { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 10px 0; color: var(--paper-faint); font-size: 9.5px; font-weight: 700; cursor: pointer; transition: color 0.2s; letter-spacing: 0.05em; text-transform: uppercase; position: relative; }
+  .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; background: rgba(11,6,22,0.92); backdrop-filter: blur(14px); border-top: 1px solid var(--line); display: flex; z-index: 100; padding-bottom: env(safe-area-inset-bottom); }
+  .bottom-nav-item { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 10px 0; color: var(--paper-faint); font-size: 9.5px; font-weight: 700; cursor: pointer; transition: color 0.25s var(--ease); letter-spacing: 0.05em; text-transform: uppercase; position: relative; }
   .bottom-nav-item.active { color: var(--paper); }
-  .bottom-nav-item.active::before { content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 18px; height: 2px; background: var(--paper); border-radius: 2px; }
-  .bottom-nav-icon { font-size: 18px; line-height: 1; }
+  .bottom-nav-item.active .bottom-nav-icon { text-shadow: 0 0 12px var(--seal-bright); }
+  .bottom-nav-item.active::before { content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 22px; height: 2px; background: linear-gradient(90deg, var(--seal-bright), var(--jade-bright)); border-radius: 2px; animation: navPillIn 0.3s var(--ease); }
+  @keyframes navPillIn { from { width: 0; opacity: 0; } to { width: 22px; opacity: 1; } }
+  .bottom-nav-icon { font-size: 18px; line-height: 1; transition: text-shadow 0.25s; }
   @media (min-width: 768px) { .bottom-nav { display: none; } }
   @media (max-width: 767px) { .main-content { padding-bottom: 76px !important; } }
 
@@ -286,7 +291,7 @@ const GLOBAL_CSS = `
   .seal-badge { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; background: var(--seal-dim); border: 1px solid var(--seal); border-radius: 99px; font-size: 9.5px; font-weight: 800; color: var(--seal-bright); letter-spacing: 0.1em; text-transform: uppercase; }
 
   .halftone {
-    background-image: radial-gradient(circle, rgba(244,242,237,0.5) 0.6px, transparent 0.6px);
+    background-image: radial-gradient(circle, rgba(246,241,255,0.5) 0.6px, transparent 0.6px);
     background-size: 5px 5px;
   }
 
@@ -331,6 +336,38 @@ const GLOBAL_CSS = `
   @keyframes musicCardOut { 0% { opacity: 1; transform: translateY(0) scale(1); } 100% { opacity: 0; transform: translateY(10px) scale(0.92); } }
   @keyframes liquidPulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.12); } }
 
+  /* ---- ambient liquid layer: two soft blobs sitting behind all content
+     (z-index 0, same layer as the grain texture) that drift slowly at all
+     times and, once music is enabled, switch to a faster drift + a gentle
+     scale pulse timed loosely to a beat. Only transform/opacity animate —
+     the blur itself is static per element, so the compositor just repositions
+     an already-blurred layer each frame instead of re-blurring pixels,
+     which is what keeps this cheap even at full-bleed size. ---- */
+  .liquid-bg { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+  .liquid-blob {
+    position: absolute; border-radius: 50%; filter: blur(70px); opacity: 0.55;
+    will-change: transform; transform: translate3d(0,0,0);
+    animation: liquidDriftA 26s ease-in-out infinite;
+  }
+  .liquid-blob.b2 { animation-name: liquidDriftB; animation-duration: 32s; }
+  .liquid-bg.music-live .liquid-blob { animation-duration: 6.5s; opacity: 0.75; }
+  .liquid-bg.music-live .liquid-blob.b2 { animation-duration: 7.5s; }
+  @keyframes liquidDriftA {
+    0%   { transform: translate3d(-6%,-4%,0) scale(1); }
+    30%  { transform: translate3d(8%,6%,0) scale(1.15); }
+    60%  { transform: translate3d(2%,-8%,0) scale(0.95); }
+    100% { transform: translate3d(-6%,-4%,0) scale(1); }
+  }
+  @keyframes liquidDriftB {
+    0%   { transform: translate3d(4%,6%,0) scale(1); }
+    35%  { transform: translate3d(-8%,-3%,0) scale(1.1); }
+    70%  { transform: translate3d(-2%,9%,0) scale(0.92); }
+    100% { transform: translate3d(4%,6%,0) scale(1); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .liquid-blob { animation: none; }
+  }
+
   .music-toggle { position: relative; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; border: 1px solid var(--line-strong); background: var(--ink-raised); color: var(--paper-dim); transition: border-color 0.2s, color 0.2s, background 0.2s; flex-shrink: 0; }
   .music-toggle:hover { border-color: var(--paper); color: var(--paper); }
   .music-toggle.on { color: var(--paper); border-color: var(--paper); background: var(--wash); }
@@ -350,7 +387,7 @@ const GLOBAL_CSS = `
     padding: 10px 14px 10px 10px; max-width: 320px;
     background:
       radial-gradient(circle at var(--mx) var(--my), rgba(230,74,63,0.45), transparent 55%),
-      linear-gradient(135deg, rgba(28,28,28,0.94), rgba(10,10,10,0.97));
+      linear-gradient(135deg, rgba(34,19,61,0.94), rgba(11,6,22,0.97));
     border: 1px solid var(--line-strong); box-shadow: var(--shadow-3);
     backdrop-filter: blur(14px) saturate(140%);
     animation: musicCardIn 0.45s var(--ease), liquidMorph 9s ease-in-out infinite;
@@ -359,7 +396,7 @@ const GLOBAL_CSS = `
   }
   .music-now-card::before {
     content: ''; position: absolute; inset: 0; pointer-events: none; mix-blend-mode: screen; opacity: 0.55;
-    background: radial-gradient(circle at var(--mx) var(--my), rgba(244,242,237,0.16), transparent 40%);
+    background: radial-gradient(circle at var(--mx) var(--my), rgba(246,241,255,0.16), transparent 40%);
     transform: translate3d(0,0,0);
   }
   .music-now-card.leaving { animation: musicCardOut 0.4s var(--ease) forwards; }
@@ -425,6 +462,19 @@ function FullscreenInkLoader() {
         <InkSplashLoader label="" size={120} />
         <img src={ASSET_LOGO_LARGE} alt="InkVault" style={{ height: 36, width: "auto", filter: "invert(1) brightness(1.4)", opacity: 0.95 }} />
       </div>
+    </div>
+  );
+}
+
+// Sits behind all content (z-index 0, same layer as the paper-grain texture)
+// — two big blurred magenta/cyan blobs that drift slowly at rest and pick up
+// speed + a scale pulse once music is playing, so the whole app feels alive
+// rather than static. musicLive drives a CSS class swap only, no per-frame JS.
+function AmbientLiquidBackground({ musicLive }) {
+  return (
+    <div className={`liquid-bg${musicLive ? " music-live" : ""}`} aria-hidden="true">
+      <div className="liquid-blob" style={{ left: "-10%", top: "-15%", width: "60vw", height: "60vw", background: "radial-gradient(circle, var(--seal) 0%, transparent 70%)" }}/>
+      <div className="liquid-blob b2" style={{ right: "-15%", bottom: "-10%", width: "55vw", height: "55vw", background: "radial-gradient(circle, var(--jade) 0%, transparent 70%)" }}/>
     </div>
   );
 }
@@ -1007,7 +1057,7 @@ function MangaCard({manga,bookmarks,setBookmarks,toast,onClick,index=0}) {
       onContextMenu={e=>{e.preventDefault();setCtx({x:e.clientX,y:e.clientY});}}>
       <div style={{position:"relative"}}>
         <LazyImg src={manga.cover} alt={manga.title} className="manga-cover" style={{aspectRatio:"2/3"}}/>
-        <div style={{position:"absolute",inset:0,background:"linear-gradient(to top, rgba(10,10,10,0.95) 0%, transparent 60%)"}}/>
+        <div style={{position:"absolute",inset:0,background:"linear-gradient(to top, rgba(11,6,22,0.95) 0%, transparent 60%)"}}/>
         <div style={{position:"absolute",top:8,left:8}}><span className="tag" style={{fontSize:9,padding:"2px 7px",background:"var(--ink)"}}>{manga.type}</span></div>
         <button onClick={e=>{e.stopPropagation();setBookmarks(b=>b.includes(manga.id)?b.filter(x=>x!==manga.id):[...b,manga.id]);toast(isBookmarked?"Removed from library":"Added to library","success");}}
           style={{position:"absolute",top:8,right:8,background:isBookmarked?"var(--jade-bright)":"rgba(0,0,0,0.55)",border:isBookmarked?"1px solid var(--jade-bright)":"1px solid var(--line-strong)",borderRadius:2,padding:"5px 8px",fontSize:13,cursor:"pointer",color:isBookmarked?"var(--ink)":"#fff",backdropFilter:"blur(4px)",fontWeight:700,transition:"background 0.2s var(--ease), transform 0.15s var(--ease), border-color 0.2s",transform:isBookmarked?"scale(1.05)":"scale(1)"}}>
@@ -1827,10 +1877,10 @@ function ReaderPage({manga,chapterIdx,openComments,toast,navigate,onUpdateChapte
 
   return (
     <div style={{position:"fixed",inset:0,background:bgColor,display:"flex",flexDirection:"column",zIndex:500}}>
-      <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:"rgba(244,242,237,0.1)",zIndex:10}}>
+      <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:"rgba(246,241,255,0.1)",zIndex:10}}>
         <div style={{height:"100%",width:`${progress}%`,background:"linear-gradient(90deg, var(--jade), var(--jade-bright))",transition:"width 0.1s"}}/>
       </div>
-      <div style={{position:"absolute",top:0,left:0,right:0,zIndex:9,background:"rgba(10,10,10,0.92)",backdropFilter:"blur(12px)",borderBottom:"1px solid var(--line)",padding:"10px 16px",display:"flex",alignItems:"center",gap:10,transform:showNav?"translateY(0)":"translateY(-100%)",transition:"transform 0.3s ease"}}>
+      <div style={{position:"absolute",top:0,left:0,right:0,zIndex:9,background:"rgba(11,6,22,0.92)",backdropFilter:"blur(12px)",borderBottom:"1px solid var(--line)",padding:"10px 16px",display:"flex",alignItems:"center",gap:10,transform:showNav?"translateY(0)":"translateY(-100%)",transition:"transform 0.3s ease"}}>
         <button className="btn btn-ghost btn-sm btn-icon" onClick={()=>navigate(seriesPath(manga))}>←</button>
         <div style={{flex:1,minWidth:0}}>
           <div className="brush" style={{fontSize:13,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{manga.title}</div>
@@ -1871,7 +1921,7 @@ function ReaderPage({manga,chapterIdx,openComments,toast,navigate,onUpdateChapte
           </div>
         </div>
       </div>
-      <div style={{position:"absolute",bottom:0,left:0,right:0,background:"rgba(10,10,10,0.92)",backdropFilter:"blur(12px)",borderTop:"1px solid var(--line)",padding:"10px 16px",display:"flex",alignItems:"center",gap:10,transform:showNav?"translateY(0)":"translateY(100%)",transition:"transform 0.3s ease"}}>
+      <div style={{position:"absolute",bottom:0,left:0,right:0,background:"rgba(11,6,22,0.92)",backdropFilter:"blur(12px)",borderTop:"1px solid var(--line)",padding:"10px 16px",display:"flex",alignItems:"center",gap:10,transform:showNav?"translateY(0)":"translateY(100%)",transition:"transform 0.3s ease"}}>
         <button className="btn btn-ghost btn-sm" onClick={()=>goChapter(-1)}>← Prev</button>
         <div style={{flex:1,textAlign:"center",fontSize:12,color:"var(--paper-faint)"}}>Ch.{chapter.number} · {Math.round(progress)}%</div>
         <button className="btn btn-primary btn-sm" onClick={()=>goChapter(1)}>Next →</button>
@@ -1944,8 +1994,8 @@ function AuthTrailer() {
     }
     nctx.putImageData(id, 0, 0);
 
-    const INK = '#0A0A0A', PAPER = '#F4F2ED', SEAL = '#C8312A';
-    const PAPER_DIM = '#B9B6AC', PAPER_FAINT = '#6E6C65';
+    const INK = '#0B0616', PAPER = '#F6F1FF', SEAL = '#FF2E7E';
+    const PAPER_DIM = '#C9BEE8', PAPER_FAINT = '#8B7CB8';
     const lerp = (a,b,t) => a+(b-a)*t;
     const clamp = (v,a,b) => Math.max(a,Math.min(b,v));
     const easeOut = t => 1-Math.pow(1-t,3);
@@ -2098,7 +2148,7 @@ function AuthTrailer() {
         ctx.fillStyle=PAPER; ctx.fillRect(bX,bY,bW,bH);
         ctx.fillStyle=INK; sf(10,'700'); ctx.textAlign='center'; ctx.textBaseline='middle';
         ctx.fillText('START READING FREE →',bX+bW/2,bY+bH/2);
-        ctx.strokeStyle='rgba(244,242,237,0.28)'; ctx.lineWidth=1;
+        ctx.strokeStyle='rgba(246,241,255,0.28)'; ctx.lineWidth=1;
         ctx.strokeRect(W/2+8,bY,bW,bH);
         ctx.fillStyle=PAPER_DIM; ctx.fillText('BROWSE LIBRARY',W/2+8+bW/2,bY+bH/2);
         ctx.restore();
@@ -3629,6 +3679,7 @@ function AppShell() {
 
   return (
     <div style={{minHeight:"100vh"}}>
+      <AmbientLiquidBackground musicLive={musicEnabled}/>
       <nav className="nav">
         <img src={ASSET_LOGO_NAV} alt="InkVault" onClick={()=>navigate("/")} style={{height:24,width:"auto",display:"block",filter:"invert(1) brightness(1.4)",cursor:"pointer"}}/>
         <div style={{flex:1}}/>
@@ -3648,6 +3699,7 @@ function AppShell() {
         )}
       </nav>
       <main className="main-content">
+        <div key={location.pathname} className="animate-fadeUp" style={{animationDuration:"0.32s"}}>
         <Routes>
           <Route path="/" element={
             <HomePage library={library} libraryLoading={libraryLoading} bookmarks={bookmarks} setBookmarks={setBookmarks} toast={toast} navigate={navigate} mode="all"/>
@@ -3700,6 +3752,7 @@ function AppShell() {
           }/>
           <Route path="*" element={<Navigate to="/" replace/>}/>
         </Routes>
+        </div>
       </main>
       <div className="bottom-nav">
         {navItems.map(n=>(
