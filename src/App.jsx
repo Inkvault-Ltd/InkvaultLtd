@@ -100,20 +100,25 @@ const GLOBAL_CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@500;600;700;800&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap');
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
   :root {
-    /* ---- Neon Webtoon palette: a violet-black base (not flat black) so
-       the vibrant accents have somewhere to glow, plus a hot-magenta /
-       electric-cyan complementary pair as the "alive" colors — this is the
-       set the whole liquid-reactive layer and CTAs are built from. ---- */
-    --ink: #0B0616; --ink-soft: #160C29; --ink-raised: #22133D; --ink-deep: #050310;
-    --paper: #F6F1FF; --paper-dim: #B7A9DE; --paper-faint: #6C5D95;
-    --line: rgba(246,241,255,0.10); --line-strong: rgba(246,241,255,0.22); --line-bright: rgba(246,241,255,0.4);
-    --wash: rgba(246,241,255,0.05);
-    --seal: #FF2E7E; --seal-bright: #FF6BA6; --seal-dim: rgba(255,46,126,0.18);
-    /* jade — now electric cyan, the magenta's complement on the wheel.
-       Used for "alive" states (active nav, ratings, bookmarks, progress)
-       so the app reads as two vivid colors in conversation, not one. */
-    --jade: #14E4C4; --jade-bright: #59FFE0; --jade-dim: rgba(20,228,196,0.18);
-    --ok: #F6F1FF; --warn: #FFB020;
+    /* ---- Inkvault palette: a near-black base (not flat black — it carries
+       a faint warm tint on the raised surfaces) with a two-red accent
+       system — bright coral-red for primary/"alive" states (CTAs, active
+       nav, ratings) and deep firebrick for secondary/muted accents — plus
+       a blush-pink paper tone and a steel-grey neutral. This is the set
+       the whole liquid-reactive layer and CTAs are built from. ---- */
+    --ink: #0D0D0D; --ink-soft: #1A1A1A; --ink-raised: #2A1615; --ink-deep: #060606;
+    --paper: #FFE4E1; --paper-dim: #C9A8A3; --paper-faint: #8C6F6B;
+    --line: rgba(255,228,225,0.10); --line-strong: rgba(255,228,225,0.22); --line-bright: rgba(255,228,225,0.4);
+    --wash: rgba(255,228,225,0.05);
+    --seal: #FF3D3D; --seal-bright: #FF6F63; --seal-dim: rgba(255,61,61,0.18);
+    /* jade — now deep firebrick, the seal red's darker sibling rather than
+       a contrasting hue, so the two-red system stays cohesive. Still used
+       for "alive" states (active nav, ratings, bookmarks, progress) so
+       those states read as a distinct, deeper red against the bright
+       coral-red used for primary actions. */
+    --jade: #B22222; --jade-bright: #D6483F; --jade-dim: rgba(178,34,34,0.18);
+    --steel: #DCDCDC; --steel-dim: rgba(220,220,220,0.16);
+    --ok: #FFE4E1; --warn: #FFB020;
     --radius: 3px; --radius-lg: 6px;
     --ease: cubic-bezier(.16,.84,.32,1);
     --shadow-1: 0 1px 2px rgba(0,0,0,0.4);
@@ -124,20 +129,20 @@ const GLOBAL_CSS = `
        instead of flat fills, reused everywhere so the whole app reads as
        one material language. ---- */
     --grad-canvas:
-      radial-gradient(120% 70% at 10% -10%, rgba(255,46,126,0.10), transparent 55%),
-      radial-gradient(100% 60% at 105% 0%, rgba(20,228,196,0.08), transparent 50%),
+      radial-gradient(120% 70% at 10% -10%, rgba(255,61,61,0.10), transparent 55%),
+      radial-gradient(100% 60% at 105% 0%, rgba(178,34,34,0.08), transparent 50%),
       radial-gradient(90% 60% at 50% 115%, rgba(0,0,0,0.55), transparent 60%),
       var(--ink);
     --grad-surface: linear-gradient(155deg, var(--ink-soft) 0%, var(--ink-raised) 55%, var(--ink-deep) 130%);
-    --grad-surface-hover: linear-gradient(155deg, var(--ink-raised) 0%, #33184F 50%, var(--ink-soft) 130%);
-    --grad-sheen: linear-gradient(115deg, transparent 38%, rgba(246,241,255,0.18) 50%, transparent 62%);
-    --grad-bloom: radial-gradient(60% 60% at 28% 18%, rgba(255,46,126,0.20), transparent 72%);
-    --grad-paper: linear-gradient(135deg, var(--seal-bright) 0%, var(--seal) 60%, #B0177E 130%);
+    --grad-surface-hover: linear-gradient(155deg, var(--ink-raised) 0%, #3A1F1E 50%, var(--ink-soft) 130%);
+    --grad-sheen: linear-gradient(115deg, transparent 38%, rgba(255,228,225,0.18) 50%, transparent 62%);
+    --grad-bloom: radial-gradient(60% 60% at 28% 18%, rgba(255,61,61,0.20), transparent 72%);
+    --grad-paper: linear-gradient(135deg, var(--seal-bright) 0%, var(--seal) 60%, #7A1010 130%);
     --grad-paper-hover: linear-gradient(135deg, #FF8CBE 0%, var(--seal-bright) 100%);
     --grad-line: linear-gradient(90deg, transparent, var(--line-bright) 50%, transparent);
-    --grad-ring: conic-gradient(from 210deg, rgba(255,46,126,0.55), rgba(20,228,196,0.05) 30%, rgba(20,228,196,0.5) 65%, rgba(255,46,126,0.05) 85%, rgba(255,46,126,0.55));
+    --grad-ring: conic-gradient(from 210deg, rgba(255,61,61,0.55), rgba(178,34,34,0.05) 30%, rgba(178,34,34,0.5) 65%, rgba(255,61,61,0.05) 85%, rgba(255,61,61,0.55));
     --grad-glass: linear-gradient(180deg, rgba(22,12,41,0.95), rgba(5,3,16,0.86));
-    --grad-edge: linear-gradient(180deg, rgba(246,241,255,0.08), transparent);
+    --grad-edge: linear-gradient(180deg, rgba(255,228,225,0.08), transparent);
   }
   html { scroll-behavior: smooth; }
   body {
@@ -149,7 +154,7 @@ const GLOBAL_CSS = `
      enough to read as "polish" rather than noise. */
   body::before {
     content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none;
-    background-image: radial-gradient(circle, rgba(246,241,255,0.5) 0.5px, transparent 0.5px);
+    background-image: radial-gradient(circle, rgba(255,228,225,0.5) 0.5px, transparent 0.5px);
     background-size: 4px 4px; opacity: 0.4; mix-blend-mode: overlay;
   }
   #root, body > div { position: relative; z-index: 1; }
@@ -191,7 +196,7 @@ const GLOBAL_CSS = `
   }
 
   .skeleton-ink { position: relative; background: var(--ink-soft); border: 1px solid var(--line); overflow: hidden; border-radius: var(--radius); }
-  .skeleton-ink::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent 20%, rgba(246,241,255,0.07) 50%, transparent 80%); background-size: 200% 100%; animation: shimmerInk 1.5s infinite; }
+  .skeleton-ink::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent 20%, rgba(255,228,225,0.07) 50%, transparent 80%); background-size: 200% 100%; animation: shimmerInk 1.5s infinite; }
 
   .ink-ripple { position: relative; overflow: hidden; }
   .ink-ripple::after { content: ''; position: absolute; border-radius: 50%; background: var(--wash); width: 10px; height: 10px; top: 50%; left: 50%; transform: translate(-50%,-50%) scale(0); transition: transform 0.5s, opacity 0.5s; opacity: 0; }
@@ -203,16 +208,16 @@ const GLOBAL_CSS = `
   .tag.active { background: var(--paper); border-color: var(--paper); color: var(--ink); }
 
   .btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 11px 22px; border-radius: var(--radius); font-size: 12.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; transition: all 0.18s var(--ease); border: 1px solid transparent; position: relative; overflow: hidden; }
-  .btn-primary { background: var(--grad-paper); color: var(--paper); border-color: var(--seal-bright); box-shadow: 0 6px 18px rgba(255,46,126,0.35); }
+  .btn-primary { background: var(--grad-paper); color: var(--paper); border-color: var(--seal-bright); box-shadow: 0 6px 18px rgba(255,61,61,0.35); }
   .btn-primary::before { content: ''; position: absolute; inset: 0; background: var(--grad-sheen); transform: translateX(-120%); transition: transform 0.55s var(--ease); pointer-events: none; }
   .btn-primary:hover::before { transform: translateX(120%); }
-  .btn-primary:hover { background: var(--grad-paper-hover); color: var(--paper); border-color: var(--jade-bright); transform: translateY(-1px); box-shadow: 0 8px 26px rgba(255,46,126,0.45); }
+  .btn-primary:hover { background: var(--grad-paper-hover); color: var(--paper); border-color: var(--jade-bright); transform: translateY(-1px); box-shadow: 0 8px 26px rgba(255,61,61,0.45); }
   .btn-primary:active { transform: translateY(0); }
   .btn-ghost { background: transparent; color: var(--paper-dim); border: 1px solid var(--line-strong); }
   .btn-ghost:hover { border-color: var(--paper); color: var(--paper); background: var(--wash); }
   .btn-danger { background: transparent; color: var(--seal-bright); border: 1px solid var(--seal-dim); }
   .btn-danger:hover { background: var(--seal-dim); border-color: var(--seal); }
-  .btn-seal { background: linear-gradient(135deg, var(--seal-bright), var(--seal) 65%, #7A0F52 135%); color: var(--paper); border-color: var(--seal); box-shadow: 0 6px 18px rgba(255,46,126,0.35); }
+  .btn-seal { background: linear-gradient(135deg, var(--seal-bright), var(--seal) 65%, #7A0F52 135%); color: var(--paper); border-color: var(--seal); box-shadow: 0 6px 18px rgba(255,61,61,0.35); }
   .btn-seal::before { content: ''; position: absolute; inset: 0; background: var(--grad-sheen); transform: translateX(-120%); transition: transform 0.55s var(--ease); pointer-events: none; }
   .btn-seal:hover::before { transform: translateX(120%); }
   .btn-seal:hover { background: linear-gradient(135deg, var(--seal-bright), var(--seal) 80%); transform: translateY(-1px); }
@@ -291,7 +296,7 @@ const GLOBAL_CSS = `
   .seal-badge { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; background: var(--seal-dim); border: 1px solid var(--seal); border-radius: 99px; font-size: 9.5px; font-weight: 800; color: var(--seal-bright); letter-spacing: 0.1em; text-transform: uppercase; }
 
   .halftone {
-    background-image: radial-gradient(circle, rgba(246,241,255,0.5) 0.6px, transparent 0.6px);
+    background-image: radial-gradient(circle, rgba(255,228,225,0.5) 0.6px, transparent 0.6px);
     background-size: 5px 5px;
   }
 
@@ -368,7 +373,7 @@ const GLOBAL_CSS = `
      allowed to go through a normal re-render. */
   .liquid-bg.beat-flash::after {
     content: ""; position: absolute; inset: 0;
-    background: radial-gradient(60% 60% at 50% 45%, rgba(246,241,255,0.14), transparent 70%);
+    background: radial-gradient(60% 60% at 50% 45%, rgba(255,228,225,0.14), transparent 70%);
     animation: beatFlashPulse 0.16s ease-out;
   }
   @keyframes beatFlashPulse { 0% { opacity: 0; } 30% { opacity: 1; } 100% { opacity: 0; } }
@@ -418,7 +423,7 @@ const GLOBAL_CSS = `
   }
   .music-now-card::before {
     content: ''; position: absolute; inset: 0; pointer-events: none; mix-blend-mode: screen; opacity: 0.55;
-    background: radial-gradient(circle at var(--mx) var(--my), rgba(246,241,255,0.16), transparent 40%);
+    background: radial-gradient(circle at var(--mx) var(--my), rgba(255,228,225,0.16), transparent 40%);
     transform: translate3d(0,0,0);
   }
   .music-now-card.leaving { animation: musicCardOut 0.4s var(--ease) forwards; }
@@ -580,12 +585,12 @@ function useBeatDetector(audioEl, enabled, onFrame) {
   }, [audioEl, enabled]);
 }
 
-// ASSET_FAVICON_64 is a 64x64 PNG ink-blot mark on a *white* background —
-// fine as a small tab icon, but blown up to viewport size as-is it'd just
-// be a giant white square. This draws it to an offscreen canvas once per
-// color, turns near-white pixels transparent and near-black pixels into a
-// solid tint, and caches the resulting data URL so it only runs once per
-// color per session.
+// ASSET_FAVICON_64 is a 64x64 PNG ink-blot mark with a *transparent*
+// background — fine as a small tab icon, but a single fixed color, so it
+// can't pick up the accent tints used elsewhere. This draws it to an
+// offscreen canvas once per color and re-tints the RGB channels (keeping
+// the source alpha as-is), caching the resulting data URL so it only runs
+// once per color per session.
 const faviconMaskCache = new Map();
 
 function hexToRgb(hex) {
@@ -609,9 +614,12 @@ function useTintedFaviconMask(hexColor) {
       const d = frame.data;
       const [r, g, b] = hexToRgb(hexColor);
       for (let i = 0; i < d.length; i += 4) {
-        const luminance = (d[i] + d[i + 1] + d[i + 2]) / 3;
+        // The source PNG already has real alpha — a transparent background
+        // with an opaque black blot — so only the RGB channels need tinting.
+        // (Previously this derived alpha from luminance, but the transparent
+        // background pixels are RGB(0,0,0) same as the ink, so that inverted
+        // them to fully opaque and rendered as a solid square.)
         d[i] = r; d[i + 1] = g; d[i + 2] = b;
-        d[i + 3] = 255 - luminance; // white -> transparent, ink -> opaque tint
       }
       ctx.putImageData(frame, 0, 0);
       const url = canvas.toDataURL("image/png");
@@ -630,8 +638,8 @@ function useTintedFaviconMask(hexColor) {
 // feDisplacementMap so the shapes visibly warp/ripple, spiking sharply on
 // detected beats/drops rather than just running a faster canned animation.
 function BeatReactiveLiquidBackground({ audioEl, musicEnabled }) {
-  const sealMask = useTintedFaviconMask("#FF2E7E"); // var(--seal)
-  const jadeMask = useTintedFaviconMask("#14E4C4"); // var(--jade)
+  const sealMask = useTintedFaviconMask("#FF3D3D"); // var(--seal)
+  const jadeMask = useTintedFaviconMask("#B22222"); // var(--jade)
 
   const blobARef = useRef(null);
   const blobBRef = useRef(null);
@@ -2100,7 +2108,7 @@ function ReaderPage({manga,chapterIdx,openComments,toast,navigate,onUpdateChapte
 
   return (
     <div style={{position:"fixed",inset:0,background:bgColor,display:"flex",flexDirection:"column",zIndex:500}}>
-      <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:"rgba(246,241,255,0.1)",zIndex:10}}>
+      <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:"rgba(255,228,225,0.1)",zIndex:10}}>
         <div style={{height:"100%",width:`${progress}%`,background:"linear-gradient(90deg, var(--jade), var(--jade-bright))",transition:"width 0.1s"}}/>
       </div>
       <div style={{position:"absolute",top:0,left:0,right:0,zIndex:9,background:"rgba(11,6,22,0.92)",backdropFilter:"blur(12px)",borderBottom:"1px solid var(--line)",padding:"10px 16px",display:"flex",alignItems:"center",gap:10,transform:showNav?"translateY(0)":"translateY(-100%)",transition:"transform 0.3s ease"}}>
@@ -2217,8 +2225,8 @@ function AuthTrailer() {
     }
     nctx.putImageData(id, 0, 0);
 
-    const INK = '#0B0616', PAPER = '#F6F1FF', SEAL = '#FF2E7E';
-    const PAPER_DIM = '#C9BEE8', PAPER_FAINT = '#8B7CB8';
+    const INK = '#0D0D0D', PAPER = '#FFE4E1', SEAL = '#FF3D3D';
+    const PAPER_DIM = '#E8C4BE', PAPER_FAINT = '#A8827D';
     const lerp = (a,b,t) => a+(b-a)*t;
     const clamp = (v,a,b) => Math.max(a,Math.min(b,v));
     const easeOut = t => 1-Math.pow(1-t,3);
@@ -2371,7 +2379,7 @@ function AuthTrailer() {
         ctx.fillStyle=PAPER; ctx.fillRect(bX,bY,bW,bH);
         ctx.fillStyle=INK; sf(10,'700'); ctx.textAlign='center'; ctx.textBaseline='middle';
         ctx.fillText('START READING FREE →',bX+bW/2,bY+bH/2);
-        ctx.strokeStyle='rgba(246,241,255,0.28)'; ctx.lineWidth=1;
+        ctx.strokeStyle='rgba(255,228,225,0.28)'; ctx.lineWidth=1;
         ctx.strokeRect(W/2+8,bY,bW,bH);
         ctx.fillStyle=PAPER_DIM; ctx.fillText('BROWSE LIBRARY',W/2+8+bW/2,bY+bH/2);
         ctx.restore();
