@@ -345,13 +345,33 @@ const GLOBAL_CSS = `
      which is what keeps this cheap even at full-bleed size. ---- */
   .liquid-bg { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
   .liquid-blob {
-    position: absolute; border-radius: 50%; filter: blur(70px); opacity: 0.55;
+    position: absolute; filter: blur(70px); opacity: 0.55;
     will-change: transform; transform: translate3d(0,0,0);
     animation: liquidDriftA 26s ease-in-out infinite;
   }
   .liquid-blob.b2 { animation-name: liquidDriftB; animation-duration: 32s; }
-  .liquid-bg.music-live .liquid-blob { animation-duration: 6.5s; opacity: 0.75; }
+  .liquid-bg.music-live .liquid-blob { animation-duration: 6.5s; }
   .liquid-bg.music-live .liquid-blob.b2 { animation-duration: 7.5s; }
+  /* Favicon-shaped blobs: the SVG feDisplacementMap filter (applied inline
+     per-element via style, since each blob references its own <filter> id)
+     does the beat-reactive warping; --energy (written straight to the DOM
+     from the beat-detector rAF loop, no React re-renders) drives opacity so
+     the shape visibly brightens on louder passages, not just distorts. */
+  .liquid-blob.liquid-favicon {
+    object-fit: contain; filter: blur(6px);
+    opacity: calc(0.45 + var(--energy, 0) * 0.4);
+    transition: opacity 0.08s linear;
+  }
+  .liquid-bg.music-live .liquid-blob.liquid-favicon { filter: blur(3px); }
+  /* Brief brightening flash on a detected beat/drop — a discrete React
+     state toggle (not per-frame), so this is the one part of the effect
+     allowed to go through a normal re-render. */
+  .liquid-bg.beat-flash::after {
+    content: ""; position: absolute; inset: 0;
+    background: radial-gradient(60% 60% at 50% 45%, rgba(246,241,255,0.14), transparent 70%);
+    animation: beatFlashPulse 0.16s ease-out;
+  }
+  @keyframes beatFlashPulse { 0% { opacity: 0; } 30% { opacity: 1; } 100% { opacity: 0; } }
   @keyframes liquidDriftA {
     0%   { transform: translate3d(-6%,-4%,0) scale(1); }
     30%  { transform: translate3d(8%,6%,0) scale(1.15); }
@@ -366,6 +386,8 @@ const GLOBAL_CSS = `
   }
   @media (prefers-reduced-motion: reduce) {
     .liquid-blob { animation: none; }
+    .liquid-blob.liquid-favicon { filter: blur(6px); opacity: 0.45; }
+    .liquid-bg.beat-flash::after { animation: none; opacity: 0; }
   }
 
   .music-toggle { position: relative; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; border: 1px solid var(--line-strong); background: var(--ink-raised); color: var(--paper-dim); transition: border-color 0.2s, color 0.2s, background 0.2s; flex-shrink: 0; }
@@ -466,15 +488,206 @@ function FullscreenInkLoader() {
   );
 }
 
-// Sits behind all content (z-index 0, same layer as the paper-grain texture)
-// — two big blurred magenta/cyan blobs that drift slowly at rest and pick up
-// speed + a scale pulse once music is playing, so the whole app feels alive
-// rather than static. musicLive drives a CSS class swap only, no per-frame JS.
-function AmbientLiquidBackground({ musicLive }) {
+// ---- Beat-reactive liquid background ----------------------------------
+//
+// Replaces the old "two blurred circles that speed up while music is on"
+// version. Two things changed:
+//   1. The blob shapes are now the actual favicon ink-blot mark (recolored,
+//      background stripped to transparent), not abstract gradient circles.
+//   2. Distortion is driven by a real Web Audio analyser reading the
+//      playing track's bass energy — beat spikes kick an SVG
+//      feDisplacementMap's `scale` up and let it spring back down — instead
+//      of a CSS animation-duration swap that only knew "music on/off".
+//
+// The analyser setup is cached per-<audio>-element in a module-level
+// WeakMap (see getOrCreateAnalyser below), NOT in a ref local to this
+// component. createMediaElementSource() can only ever be called once per
+// audio element for its whole lifetime, and this component unmounts/
+// remounts as the user navigates in and out of the reader route (which
+// renders its own chrome without this background) — a plain useRef guard
+// would throw on the second mount. Caching on the element itself survives
+// that remount cycle.
+
+const analyserCache = new WeakMap();
+
+function getOrCreateAnalyser(audioEl) {
+  if (analyserCache.has(audioEl)) return analyserCache.get(audioEl);
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) return null;
+  try {
+    const ctx = new AudioCtx();
+    const source = ctx.createMediaElementSource(audioEl);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 64; // small + cheap; only coarse bass energy is needed
+    analyser.smoothingTimeConstant = 0.6;
+    source.connect(analyser);
+    analyser.connect(ctx.destination); // re-route to speakers, or the element goes silent
+    const entry = { ctx, analyser, data: new Uint8Array(analyser.frequencyBinCount) };
+    analyserCache.set(audioEl, entry);
+    return entry;
+  } catch {
+    // Some browsers/environments can still refuse this (e.g. a second
+    // legitimate attempt after a hot-reload). Fail quiet — the background
+    // just falls back to its idle CSS drift.
+    return null;
+  }
+}
+
+// rAF loop reading bass-band energy off the analyser and detecting spikes
+// against a rolling average. This is a "good enough for ambient visuals"
+// transient detector, not a real BPM tracker — see handoff notes for
+// heavier options (autocorrelation-based BPM libraries) if it's ever not
+// musical enough. Deliberately writes to refs/DOM via onFrame rather than
+// calling setState, since this runs up to 60x/sec and per-frame React
+// re-renders would undo the CPU-cost work done elsewhere in this file.
+function useBeatDetector(audioEl, enabled, onFrame) {
+  const onFrameRef = useRef(onFrame);
+  useEffect(() => { onFrameRef.current = onFrame; }, [onFrame]);
+
+  useEffect(() => {
+    if (!audioEl || !enabled) return;
+    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    audioEl.crossOrigin = "anonymous"; // no-op if already set/loaded
+    const entry = getOrCreateAnalyser(audioEl);
+    if (!entry) return;
+    if (entry.ctx.state === "suspended") entry.ctx.resume().catch(() => {});
+
+    let raf;
+    let rollingAvg = 0;
+    let beatUntil = 0;
+    const tick = () => {
+      const { analyser, data } = entry;
+      analyser.getByteFrequencyData(data);
+      // Low-mid bins only — that's where kick/bass "drops" live, and
+      // ignoring highs keeps this from firing on every hi-hat.
+      let sum = 0;
+      const bassBins = Math.max(4, data.length >> 2);
+      for (let i = 0; i < bassBins; i++) sum += data[i];
+      const level = sum / (bassBins * 255); // 0..1
+
+      rollingAvg = rollingAvg * 0.92 + level * 0.08;
+      if (level > rollingAvg * 1.35 && level > 0.15) beatUntil = performance.now() + 120;
+
+      onFrameRef.current(level, performance.now() < beatUntil);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+    // Intentionally NOT closing/tearing down entry.ctx here — the audio
+    // graph should stay wired up and playing across this component
+    // unmounting (e.g. entering the reader), only the visual rAF loop stops.
+  }, [audioEl, enabled]);
+}
+
+// ASSET_FAVICON_64 is a 64x64 PNG ink-blot mark on a *white* background —
+// fine as a small tab icon, but blown up to viewport size as-is it'd just
+// be a giant white square. This draws it to an offscreen canvas once per
+// color, turns near-white pixels transparent and near-black pixels into a
+// solid tint, and caches the resulting data URL so it only runs once per
+// color per session.
+const faviconMaskCache = new Map();
+
+function hexToRgb(hex) {
+  const n = parseInt(hex.replace("#", ""), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function useTintedFaviconMask(hexColor) {
+  const [dataUrl, setDataUrl] = useState(() => faviconMaskCache.get(hexColor) || null);
+  useEffect(() => {
+    if (faviconMaskCache.has(hexColor)) { setDataUrl(faviconMaskCache.get(hexColor)); return; }
+    let cancelled = false;
+    const img = new Image();
+    img.onload = () => {
+      if (cancelled) return;
+      const canvas = document.createElement("canvas");
+      canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0);
+      const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const d = frame.data;
+      const [r, g, b] = hexToRgb(hexColor);
+      for (let i = 0; i < d.length; i += 4) {
+        const luminance = (d[i] + d[i + 1] + d[i + 2]) / 3;
+        d[i] = r; d[i + 1] = g; d[i + 2] = b;
+        d[i + 3] = 255 - luminance; // white -> transparent, ink -> opaque tint
+      }
+      ctx.putImageData(frame, 0, 0);
+      const url = canvas.toDataURL("image/png");
+      faviconMaskCache.set(hexColor, url);
+      setDataUrl(url);
+    };
+    img.src = ASSET_FAVICON_64;
+    return () => { cancelled = true; };
+  }, [hexColor]);
+  return dataUrl;
+}
+
+// Sits behind all content (z-index 0, same layer as the paper-grain
+// texture). Two favicon-shaped, color-tinted blobs drift slowly at rest;
+// once music is playing, a real Web Audio analyser drives an SVG
+// feDisplacementMap so the shapes visibly warp/ripple, spiking sharply on
+// detected beats/drops rather than just running a faster canned animation.
+function BeatReactiveLiquidBackground({ audioEl, musicEnabled }) {
+  const sealMask = useTintedFaviconMask("#FF2E7E"); // var(--seal)
+  const jadeMask = useTintedFaviconMask("#14E4C4"); // var(--jade)
+
+  const blobARef = useRef(null);
+  const blobBRef = useRef(null);
+  const dispARef = useRef(null);
+  const dispBRef = useRef(null);
+  const noiseARef = useRef(null);
+  const noiseBRef = useRef(null);
+  const scaleA = useRef(12);
+  const scaleB = useRef(10);
+  const [beatFlash, setBeatFlash] = useState(false);
+  const flashTimer = useRef(null);
+
+  const handleFrame = useCallback((level, isBeat) => {
+    // Spring toward an energy-driven target scale; beats kick it up hard,
+    // otherwise it eases back down — cheap substitute for a real spring sim.
+    const targetA = 10 + level * 60;
+    const targetB = 8 + level * 48;
+    scaleA.current += (targetA - scaleA.current) * (isBeat ? 0.6 : 0.12);
+    scaleB.current += (targetB - scaleB.current) * (isBeat ? 0.55 : 0.12);
+    if (dispARef.current) dispARef.current.setAttribute("scale", scaleA.current.toFixed(1));
+    if (dispBRef.current) dispBRef.current.setAttribute("scale", scaleB.current.toFixed(1));
+    if (noiseARef.current) noiseARef.current.setAttribute("baseFrequency", `${(0.008 + level * 0.02).toFixed(4)} ${(0.014 + level * 0.03).toFixed(4)}`);
+    if (noiseBRef.current) noiseBRef.current.setAttribute("baseFrequency", `${(0.010 + level * 0.018).toFixed(4)} ${(0.016 + level * 0.026).toFixed(4)}`);
+    if (blobARef.current) blobARef.current.style.setProperty("--energy", level.toFixed(3));
+    if (blobBRef.current) blobBRef.current.style.setProperty("--energy", level.toFixed(3));
+    if (isBeat && !flashTimer.current) {
+      setBeatFlash(true);
+      flashTimer.current = setTimeout(() => { setBeatFlash(false); flashTimer.current = null; }, 160);
+    }
+  }, []);
+
+  useBeatDetector(audioEl, musicEnabled, handleFrame);
+  useEffect(() => () => clearTimeout(flashTimer.current), []);
+
   return (
-    <div className={`liquid-bg${musicLive ? " music-live" : ""}`} aria-hidden="true">
-      <div className="liquid-blob" style={{ left: "-10%", top: "-15%", width: "60vw", height: "60vw", background: "radial-gradient(circle, var(--seal) 0%, transparent 70%)" }}/>
-      <div className="liquid-blob b2" style={{ right: "-15%", bottom: "-10%", width: "55vw", height: "55vw", background: "radial-gradient(circle, var(--jade) 0%, transparent 70%)" }}/>
+    <div className={`liquid-bg${musicEnabled ? " music-live" : ""}${beatFlash ? " beat-flash" : ""}`} aria-hidden="true">
+      <svg width="0" height="0" style={{ position: "absolute" }}>
+        <defs>
+          <filter id="liquidDistortA" x="-60%" y="-60%" width="220%" height="220%">
+            <feTurbulence ref={noiseARef} type="fractalNoise" baseFrequency="0.01 0.02" numOctaves="2" seed="7" result="noise" />
+            <feDisplacementMap ref={dispARef} in="SourceGraphic" in2="noise" scale="12" xChannelSelector="R" yChannelSelector="G" />
+          </filter>
+          <filter id="liquidDistortB" x="-60%" y="-60%" width="220%" height="220%">
+            <feTurbulence ref={noiseBRef} type="fractalNoise" baseFrequency="0.012 0.018" numOctaves="2" seed="23" result="noise" />
+            <feDisplacementMap ref={dispBRef} in="SourceGraphic" in2="noise" scale="10" xChannelSelector="R" yChannelSelector="G" />
+          </filter>
+        </defs>
+      </svg>
+      {sealMask && (
+        <img ref={blobARef} src={sealMask} alt="" className="liquid-blob liquid-favicon"
+          style={{ left: "-16%", top: "-20%", width: "62vw", height: "62vw", filter: "url(#liquidDistortA)" }} />
+      )}
+      {jadeMask && (
+        <img ref={blobBRef} src={jadeMask} alt="" className="liquid-blob liquid-favicon b2"
+          style={{ right: "-20%", bottom: "-16%", width: "56vw", height: "56vw", filter: "url(#liquidDistortB)" }} />
+      )}
     </div>
   );
 }
@@ -830,7 +1043,16 @@ function useMusicPlayer(musicLibrary) {
   }, [enabled]);
 
   useEffect(() => {
-    if (!audioRef.current) audioRef.current = new Audio();
+    if (!audioRef.current) {
+      audioRef.current = new Audio();
+      // Needed for the beat-reactive background's Web Audio analyser to be
+      // able to read frequency data from the Supabase-hosted track. Must be
+      // set before any src is ever assigned to this element (hence doing it
+      // immediately on creation, once) — and the storage bucket serving the
+      // tracks needs to actually send Access-Control-Allow-Origin, or
+      // getByteFrequencyData will silently return all zeros with no error.
+      audioRef.current.crossOrigin = "anonymous";
+    }
     const audio = audioRef.current;
     audio.volume = 0.55;
     if (!enabled || musicLibrary.length === 0) {
@@ -885,6 +1107,7 @@ function useMusicPlayer(musicLibrary) {
     enabled, toggle, currentTrack: showCard ? currentTrack : null,
     trackNum: (trackIdx % (musicLibrary.length || 1)) + 1, trackCount: musicLibrary.length,
     dismissCard: () => setShowCard(false), next, prev, holdCard, releaseCard,
+    audioRef,
   };
 }
 
@@ -3574,7 +3797,7 @@ function AppShell() {
 
   useEffect(() => { fetchMusic(); }, [fetchMusic]);
 
-  const { enabled: musicEnabled, toggle: toggleMusic, currentTrack: nowPlayingTrack, trackNum: musicTrackNum, trackCount: musicTrackCount, dismissCard: dismissNowPlaying, next: nextTrack, prev: prevTrack, holdCard: holdMusicCard, releaseCard: releaseMusicCard } = useMusicPlayer(musicLibrary);
+  const { enabled: musicEnabled, toggle: toggleMusic, currentTrack: nowPlayingTrack, trackNum: musicTrackNum, trackCount: musicTrackCount, dismissCard: dismissNowPlaying, next: nextTrack, prev: prevTrack, holdCard: holdMusicCard, releaseCard: releaseMusicCard, audioRef: musicAudioRef } = useMusicPlayer(musicLibrary);
 
   const social = useSocial(user, toast);
   const [showFriends,setShowFriends]=useState(false);
@@ -3679,7 +3902,7 @@ function AppShell() {
 
   return (
     <div style={{minHeight:"100vh"}}>
-      <AmbientLiquidBackground musicLive={musicEnabled}/>
+      <BeatReactiveLiquidBackground audioEl={musicAudioRef.current} musicEnabled={musicEnabled}/>
       <nav className="nav">
         <img src={ASSET_LOGO_NAV} alt="InkVault" onClick={()=>navigate("/")} style={{height:24,width:"auto",display:"block",filter:"invert(1) brightness(1.4)",cursor:"pointer"}}/>
         <div style={{flex:1}}/>
