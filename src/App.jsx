@@ -1290,7 +1290,7 @@ function MangaCard({manga,bookmarks,setBookmarks,toast,onClick,index=0}) {
           <span style={{fontSize:9,padding:"2px 7px",border:"1px solid var(--line-strong)",color:manga.status==="Ongoing"?"var(--paper)":"var(--paper-faint)",fontWeight:700,letterSpacing:"0.05em",textTransform:"uppercase"}}>{manga.status}</span>
         </div>
         <div style={{position:"absolute",bottom:8,left:10,right:10}}>
-          <div style={{fontSize:12,fontWeight:700,color:"#fff",lineHeight:1.3,overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{manga.title}</div>
+          <div className="brush" style={{fontSize:12.5,fontWeight:700,color:"#fff",lineHeight:1.3,overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{manga.title}</div>
           <div style={{fontSize:10,color:"var(--paper-dim)",marginTop:2}}>★ {manga.rating} · Ch.{manga.chapters.length}</div>
         </div>
       </div>
