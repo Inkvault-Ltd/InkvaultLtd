@@ -348,6 +348,91 @@ const GLOBAL_CSS = `
   }
   @media (min-width: 768px) { .comment-fab { bottom: 28px; } }
 
+  /* ---- floating "read together" call button in reader ---- */
+  .call-fab {
+    position: fixed; z-index: 60; left: 16px; bottom: 148px;
+    display: flex; align-items: center; justify-content: center;
+    width: 44px; height: 44px; border-radius: 50%;
+    background: var(--jade); color: var(--ink); border: 1px solid var(--line-strong);
+    font-size: 17px; box-shadow: var(--shadow-3);
+    transition: transform 0.2s var(--ease), background 0.2s var(--ease);
+  }
+  .call-fab:hover { transform: scale(1.07); }
+  .call-fab:active { transform: scale(0.96); }
+  .call-fab.active { background: var(--seal-bright); color: #fff; animation: floatY 2.4s ease-in-out infinite; }
+  @media (min-width: 768px) { .call-fab { bottom: 92px; } }
+
+  /* ---- global call bar (audio / group call) ---- */
+  @keyframes callBarIn { from { opacity: 0; transform: translateY(16px) scale(0.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
+  @keyframes callBarOut { from { opacity: 1; transform: translateY(0) scale(1); } to { opacity: 0; transform: translateY(16px) scale(0.96); } }
+  @keyframes micPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(122,184,150,0.55); } 70% { box-shadow: 0 0 0 8px rgba(122,184,150,0); } }
+  .call-bar {
+    position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%); z-index: 700;
+    display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+    background: linear-gradient(135deg, rgba(34,19,61,0.96), rgba(11,6,22,0.98));
+    border: 1px solid var(--line-strong); border-radius: 99px; box-shadow: var(--shadow-3);
+    backdrop-filter: blur(14px) saturate(140%);
+    animation: callBarIn 0.35s var(--ease);
+    max-width: calc(100vw - 24px);
+  }
+  .call-bar.leaving { animation: callBarOut 0.3s var(--ease) forwards; }
+  @media (min-width: 768px) { .call-bar { bottom: 24px; left: 24px; transform: none; } }
+  .call-bar-avatars { display: flex; align-items: center; }
+  .call-bar-avatar {
+    width: 30px; height: 30px; border-radius: 50%; margin-left: -10px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800;
+    background: linear-gradient(135deg, var(--jade), var(--jade-bright)); color: var(--ink);
+    border: 2px solid var(--ink); position: relative;
+  }
+  .call-bar-avatar:first-child { margin-left: 0; }
+  .call-bar-avatar.speaking { animation: micPulse 1.4s ease-out infinite; }
+  .call-bar-avatar .muted-dot { position: absolute; bottom: -2px; right: -2px; width: 13px; height: 13px; border-radius: 50%; background: var(--seal-bright); color: #fff; font-size: 8px; display: flex; align-items: center; justify-content: center; border: 1.5px solid var(--ink); }
+  .call-bar-label { font-size: 11px; color: var(--paper-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
+  .call-bar-btn {
+    width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    background: var(--ink-raised); color: var(--paper); border: 1px solid var(--line-strong); font-size: 14px; flex-shrink: 0;
+    transition: transform 0.15s var(--ease), background 0.15s var(--ease);
+  }
+  .call-bar-btn:hover { transform: scale(1.08); background: var(--ink-soft); }
+  .call-bar-btn.on { background: var(--wash); border-color: var(--paper); }
+  .call-bar-btn.muted { background: rgba(230,74,63,0.18); border-color: var(--seal); color: var(--seal-bright); }
+  .call-bar-btn.hangup { background: var(--seal); color: #fff; border-color: var(--seal); }
+  .call-bar-btn.hangup:hover { background: var(--seal-bright); }
+
+  /* ---- emote picker (hover strip above the emote button) ---- */
+  .emote-picker-wrap { position: relative; }
+  .emote-picker {
+    position: absolute; bottom: calc(100% + 10px); left: 50%; transform: translateX(-50%) translateY(6px);
+    display: flex; gap: 4px; padding: 6px 8px;
+    background: var(--ink-raised); border: 1px solid var(--line-strong); border-radius: 99px; box-shadow: var(--shadow-2);
+    opacity: 0; pointer-events: none; transition: opacity 0.18s var(--ease), transform 0.18s var(--ease);
+    white-space: nowrap;
+  }
+  .emote-picker-wrap:hover .emote-picker, .emote-picker-wrap:focus-within .emote-picker { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+  .emote-picker-btn { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-size: 17px; border-radius: 50%; transition: transform 0.12s var(--ease), background 0.12s var(--ease); }
+  .emote-picker-btn:hover { transform: scale(1.25); background: var(--wash); }
+
+  /* ---- flying emote reaction overlay ---- */
+  @keyframes emoteFly {
+    0% { transform: translate(var(--drift-start,0px), 0) scale(0.4) rotate(0deg); opacity: 0; }
+    12% { opacity: 1; transform: translate(var(--drift-start,0px), -30px) scale(1.15) rotate(var(--rot,-8deg)); }
+    100% { transform: translate(var(--drift-end,0px), -320px) scale(1) rotate(0deg); opacity: 0; }
+  }
+  .emote-fly {
+    position: fixed; z-index: 800; left: var(--x, 50%); bottom: 100px; pointer-events: none;
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    animation: emoteFly 2.6s cubic-bezier(0.2,0.6,0.3,1) forwards;
+  }
+  .emote-fly-glyph { font-size: 34px; filter: drop-shadow(0 3px 6px rgba(0,0,0,0.4)); }
+  .emote-fly-name { font-size: 10px; font-weight: 700; color: var(--paper); background: rgba(11,6,22,0.75); padding: 2px 7px; border-radius: 99px; white-space: nowrap; border: 1px solid var(--line-strong); }
+
+  /* ---- group chat list / thread ---- */
+  .group-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--line); cursor: pointer; transition: background 0.15s var(--ease); }
+  .group-row:hover { background: var(--wash); }
+  .group-row-avatar { width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 800; background: linear-gradient(135deg, var(--seal), var(--seal-bright)); color: #fff; }
+  .group-member-chip { display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px 4px 4px; border-radius: 99px; background: var(--ink-raised); border: 1px solid var(--line-strong); font-size: 12px; margin: 3px 4px 0 0; }
+  .group-member-chip .chip-avatar { width: 18px; height: 18px; border-radius: 50%; background: var(--jade); color: var(--ink); font-size: 9px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+
   /* ---- ink splash arrival overlay (plays over a jumped-to page) ---- */
   .splash-arrival { position: absolute; inset: 0; pointer-events: none; display: flex; align-items: center; justify-content: center; z-index: 10; overflow: hidden; }
 
@@ -1661,6 +1746,7 @@ function useSocial(user, toast) {
   const [outgoing, setOutgoing] = useState([]);      // requests I sent
   const [notifications, setNotifications] = useState([]);
   const [conversations, setConversations] = useState([]); // [{userId, username, lastMessage, unread}]
+  const [groups, setGroups] = useState([]); // [{id, name, ownerId, members:[{id,username}], lastMessage, unread}]
 
   const refetchFriends = useCallback(async () => {
     if (!user) { setFriends([]); setIncoming([]); setOutgoing([]); return; }
@@ -1712,7 +1798,56 @@ function useSocial(user, toast) {
     setConversations(Array.from(byUser.values()).sort((a, b) => new Date(b.lastMessage.created_at) - new Date(a.lastMessage.created_at)));
   }, [user]);
 
-  useEffect(() => { refetchFriends(); refetchNotifications(); refetchConversations(); }, [refetchFriends, refetchNotifications, refetchConversations]);
+  // group_members: (group_id, user_id). groups: (id, name, owner_id, created_at).
+  // group_messages: (id, group_id, sender_id, text, created_at). RLS scoped to
+  // members of the group; add to the realtime publication alongside messages.
+  const refetchGroups = useCallback(async () => {
+    if (!user) { setGroups([]); return; }
+    const { data: memberships, error } = await supabase.from("group_members").select("group_id").eq("user_id", user.id);
+    if (error) { console.error(error); return; }
+    const groupIds = (memberships || []).map(m => m.group_id);
+    if (!groupIds.length) { setGroups([]); return; }
+    const [{ data: groupRows }, { data: memberRows }, { data: lastMsgs }] = await Promise.all([
+      supabase.from("groups").select("id, name, owner_id, created_at").in("id", groupIds),
+      supabase.from("group_members").select("group_id, user_id, profiles(id, username)").in("group_id", groupIds),
+      supabase.from("group_messages").select("*").in("group_id", groupIds).order("created_at", { ascending: false }),
+    ]);
+    const membersByGroup = new Map();
+    (memberRows || []).forEach(r => {
+      const list = membersByGroup.get(r.group_id) || [];
+      list.push({ id: r.user_id, username: r.profiles?.username || "unknown" });
+      membersByGroup.set(r.group_id, list);
+    });
+    const lastByGroup = new Map();
+    (lastMsgs || []).forEach(m => { if (!lastByGroup.has(m.group_id)) lastByGroup.set(m.group_id, m); });
+    setGroups((groupRows || []).map(g => ({
+      id: g.id, name: g.name, ownerId: g.owner_id,
+      members: membersByGroup.get(g.id) || [],
+      lastMessage: lastByGroup.get(g.id) || null,
+    })).sort((a, b) => new Date(b.lastMessage?.created_at || 0) - new Date(a.lastMessage?.created_at || 0)));
+  }, [user]);
+
+  const createGroup = useCallback(async (name, memberIds) => {
+    if (!user || !name.trim() || !memberIds.length) return null;
+    const { data: group, error } = await supabase.from("groups").insert({ name: name.trim(), owner_id: user.id }).select().single();
+    if (error) { toast("Could not create group", "error"); return null; }
+    const rows = [user.id, ...memberIds].map(id => ({ group_id: group.id, user_id: id }));
+    await supabase.from("group_members").insert(rows);
+    await Promise.all(memberIds.map(id => supabase.from("notifications").insert({ user_id: id, actor_id: user.id, type: "group_invite", data: { username: user.username, groupName: name.trim(), groupId: group.id } })));
+    toast(`"${name.trim()}" created`, "success");
+    refetchGroups();
+    return group.id;
+  }, [user, toast, refetchGroups]);
+
+  const sendGroupMessage = useCallback(async (groupId, text) => {
+    if (!user || !text.trim()) return false;
+    const { error } = await supabase.from("group_messages").insert({ group_id: groupId, sender_id: user.id, text: text.trim() });
+    if (error) { toast("Could not send message", "error"); return false; }
+    refetchGroups();
+    return true;
+  }, [user, toast, refetchGroups]);
+
+  useEffect(() => { refetchFriends(); refetchNotifications(); refetchConversations(); refetchGroups(); }, [refetchFriends, refetchNotifications, refetchConversations, refetchGroups]);
 
   // Realtime: new notifications, new DMs, and incoming friend requests all
   // stream straight into state instead of waiting for a manual refresh.
@@ -1721,6 +1856,7 @@ function useSocial(user, toast) {
     const channel = supabase.channel(`social-${user.id}`)
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${user.id}` }, payload => {
         setNotifications(prev => [payload.new, ...prev]);
+        if (payload.new.type === "group_invite") refetchGroups();
       })
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `recipient_id=eq.${user.id}` }, () => {
         refetchConversations();
@@ -1728,9 +1864,13 @@ function useSocial(user, toast) {
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "friendships", filter: `addressee_id=eq.${user.id}` }, () => {
         refetchFriends();
       })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "group_messages" }, payload => {
+        setGroups(prev => prev.some(g => g.id === payload.new.group_id) ? prev : prev);
+        refetchGroups();
+      })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [user, refetchConversations, refetchFriends]);
+  }, [user, refetchConversations, refetchFriends, refetchGroups]);
 
   const searchUsers = useCallback(async (query) => {
     if (!user || !query.trim()) return [];
@@ -1792,9 +1932,222 @@ function useSocial(user, toast) {
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  return { friends, incoming, outgoing, notifications, unreadCount, conversations,
+  return { friends, incoming, outgoing, notifications, unreadCount, conversations, groups,
     searchUsers, sendFriendRequest, respondToRequest, removeFriend, sendMessage,
-    markNotificationsRead, refetchConversations };
+    markNotificationsRead, refetchConversations, createGroup, sendGroupMessage, refetchGroups };
+}
+
+/* ============================================================================
+   Group audio/voice calls — mesh WebRTC, signaled over a Supabase Realtime
+   broadcast+presence channel keyed by an arbitrary "room id" (a series id
+   for "read together" calls, or a group id for group-chat calls). No media
+   ever touches Supabase — the channel only carries SDP offers/answers, ICE
+   candidates, presence (who's in the room + mute state), and emote pings.
+   Requires no new tables, just `realtime.channel` access (on by default).
+   ========================================================================== */
+
+const EMOTE_SET = ["👍","❤️","😂","😮","😢","🔥","🎉","😱"];
+const RTC_CONFIG = { iceServers: [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }] };
+
+function useCallRoom(user, toast) {
+  const [room, setRoom] = useState(null); // { id, label }
+  const [peers, setPeers] = useState({}); // userId -> { username, muted, speaking }
+  const [muted, setMuted] = useState(false);
+  const [emotes, setEmotes] = useState([]); // flying emote overlay queue
+  const [connecting, setConnecting] = useState(false);
+
+  const channelRef = useRef(null);
+  const localStreamRef = useRef(null);
+  const pcsRef = useRef({}); // userId -> RTCPeerConnection
+  const audioElsRef = useRef({}); // userId -> <audio>
+  const roomRef = useRef(null);
+  const mutedRef = useRef(false);
+
+  const cleanupPeer = useCallback((peerId) => {
+    pcsRef.current[peerId]?.close();
+    delete pcsRef.current[peerId];
+    const el = audioElsRef.current[peerId];
+    if (el) { el.srcObject = null; el.remove(); delete audioElsRef.current[peerId]; }
+    setPeers(prev => { const n = { ...prev }; delete n[peerId]; return n; });
+  }, []);
+
+  const makePeerConnection = useCallback((peerId, initiator) => {
+    const pc = new RTCPeerConnection(RTC_CONFIG);
+    pcsRef.current[peerId] = pc;
+    localStreamRef.current?.getTracks().forEach(t => pc.addTrack(t, localStreamRef.current));
+    pc.onicecandidate = (e) => {
+      if (e.candidate) channelRef.current?.send({ type: "broadcast", event: "rtc-signal", payload: { to: peerId, from: user.id, signal: { candidate: e.candidate } } });
+    };
+    pc.ontrack = (e) => {
+      let el = audioElsRef.current[peerId];
+      if (!el) { el = document.createElement("audio"); el.autoplay = true; document.body.appendChild(el); audioElsRef.current[peerId] = el; }
+      el.srcObject = e.streams[0];
+    };
+    pc.onconnectionstatechange = () => {
+      if (["failed", "closed", "disconnected"].includes(pc.connectionState)) cleanupPeer(peerId);
+    };
+    if (initiator) {
+      pc.onnegotiationneeded = async () => {
+        try {
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          channelRef.current?.send({ type: "broadcast", event: "rtc-signal", payload: { to: peerId, from: user.id, signal: { sdp: pc.localDescription } } });
+        } catch (err) { console.error(err); }
+      };
+    }
+    return pc;
+  }, [user, cleanupPeer]);
+
+  const leaveCall = useCallback(() => {
+    Object.keys(pcsRef.current).forEach(cleanupPeer);
+    localStreamRef.current?.getTracks().forEach(t => t.stop());
+    localStreamRef.current = null;
+    if (channelRef.current) { supabase.removeChannel(channelRef.current); channelRef.current = null; }
+    roomRef.current = null;
+    setRoom(null); setPeers({}); setMuted(false); setConnecting(false);
+  }, [cleanupPeer]);
+
+  const joinCall = useCallback(async (roomId, label) => {
+    if (!user) { toast("Sign in to start a call", "warn"); return; }
+    if (roomRef.current === roomId) return; // already in this room
+    if (roomRef.current) leaveCall();
+    setConnecting(true);
+    try {
+      localStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+      toast("Microphone access denied", "error");
+      setConnecting(false);
+      return;
+    }
+    roomRef.current = roomId;
+    setRoom({ id: roomId, label });
+    const channel = supabase.channel(`call-${roomId}`, { config: { presence: { key: user.id }, broadcast: { self: false } } });
+    channelRef.current = channel;
+
+    channel.on("presence", { event: "sync" }, () => {
+      const state = channel.presenceState();
+      const others = Object.keys(state).filter(id => id !== user.id);
+      setPeers(prev => {
+        const next = {};
+        others.forEach(id => { const meta = state[id][0]; next[id] = { username: meta?.username || "Reader", muted: !!meta?.muted, speaking: false }; });
+        return next;
+      });
+      others.forEach(peerId => {
+        if (!pcsRef.current[peerId]) makePeerConnection(peerId, user.id < peerId); // deterministic initiator
+      });
+      Object.keys(pcsRef.current).forEach(peerId => { if (!others.includes(peerId)) cleanupPeer(peerId); });
+    });
+    channel.on("presence", { event: "leave" }, ({ key }) => cleanupPeer(key));
+    channel.on("broadcast", { event: "rtc-signal" }, ({ payload }) => {
+      if (payload.to !== user.id) return;
+      const peerId = payload.from;
+      let pc = pcsRef.current[peerId];
+      if (!pc) pc = makePeerConnection(peerId, false);
+      const { sdp, candidate } = payload.signal;
+      (async () => {
+        try {
+          if (sdp) {
+            await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+            if (sdp.type === "offer") {
+              const answer = await pc.createAnswer();
+              await pc.setLocalDescription(answer);
+              channelRef.current?.send({ type: "broadcast", event: "rtc-signal", payload: { to: peerId, from: user.id, signal: { sdp: pc.localDescription } } });
+            }
+          } else if (candidate) {
+            await pc.addIceCandidate(new RTCIceCandidate(candidate));
+          }
+        } catch (err) { console.error(err); }
+      })();
+    });
+    channel.on("broadcast", { event: "mute-change" }, ({ payload }) => {
+      setPeers(prev => prev[payload.userId] ? { ...prev, [payload.userId]: { ...prev[payload.userId], muted: payload.muted } } : prev);
+    });
+    channel.on("broadcast", { event: "emote" }, ({ payload }) => {
+      pushEmote(payload.emoji, payload.username, payload.userId === user.id);
+    });
+    await channel.subscribe(async (status) => {
+      if (status === "SUBSCRIBED") {
+        await channel.track({ username: user.username, muted: mutedRef.current });
+        setConnecting(false);
+      }
+    });
+  }, [user, toast, leaveCall, makePeerConnection, cleanupPeer]);
+
+  const toggleMute = useCallback(() => {
+    const next = !mutedRef.current;
+    mutedRef.current = next;
+    setMuted(next);
+    localStreamRef.current?.getAudioTracks().forEach(t => { t.enabled = !next; });
+    channelRef.current?.track({ username: user?.username, muted: next });
+    channelRef.current?.send({ type: "broadcast", event: "mute-change", payload: { userId: user?.id, muted: next } });
+  }, [user]);
+
+  const pushEmote = useCallback((emoji, username, isSelf) => {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const driftStart = (Math.random() * 60 - 30).toFixed(0);
+    const driftEnd = (Math.random() * 140 - 70).toFixed(0);
+    const rot = (Math.random() * 20 - 10).toFixed(0);
+    const x = isSelf ? 78 : Math.round(20 + Math.random() * 40);
+    setEmotes(prev => [...prev, { id, emoji, username, driftStart, driftEnd, rot, x }]);
+    setTimeout(() => setEmotes(prev => prev.filter(e => e.id !== id)), 2700);
+  }, []);
+
+  const sendEmote = useCallback((emoji) => {
+    if (!room || !user) return;
+    pushEmote(emoji, user.username, true);
+    channelRef.current?.send({ type: "broadcast", event: "emote", payload: { emoji, userId: user.id, username: user.username } });
+  }, [room, user, pushEmote]);
+
+  useEffect(() => () => leaveCall(), []); // leave on unmount (e.g. sign out)
+
+  return { room, peers, muted, emotes, connecting, joinCall, leaveCall, toggleMute, sendEmote };
+}
+
+function EmoteFlyingLayer({ emotes }) {
+  if (!emotes.length) return null;
+  return (
+    <>
+      {emotes.map(e => (
+        <div key={e.id} className="emote-fly" style={{ "--x": `${e.x}%`, "--drift-start": `${e.driftStart}px`, "--drift-end": `${e.driftEnd}px`, "--rot": `${e.rot}deg` }}>
+          <div className="emote-fly-glyph">{e.emoji}</div>
+          <div className="emote-fly-name">{e.username}</div>
+        </div>
+      ))}
+    </>
+  );
+}
+
+function CallBar({ callRoom, user }) {
+  const { room, peers, muted, connecting, leaveCall, toggleMute, sendEmote } = callRoom;
+  const [leaving, setLeaving] = useState(false);
+  if (!room) return null;
+  const peerList = Object.entries(peers);
+  const count = peerList.length + 1;
+  const close = () => { setLeaving(true); setTimeout(leaveCall, 260); };
+  const initials = (name) => (name || "?").slice(0, 2).toUpperCase();
+  return (
+    <div className={`call-bar ${leaving ? "leaving" : ""}`}>
+      <div className="call-bar-avatars">
+        <div className="call-bar-avatar" title={`${user?.username} (you)`}>{initials(user?.username)}{muted && <span className="muted-dot">✕</span>}</div>
+        {peerList.slice(0, 4).map(([id, p]) => (
+          <div key={id} className="call-bar-avatar" title={p.username}>{initials(p.username)}{p.muted && <span className="muted-dot">✕</span>}</div>
+        ))}
+      </div>
+      <div className="call-bar-label">
+        {connecting ? "Connecting…" : `${room.label || "Group call"} · ${count} listening`}
+      </div>
+      <div className="emote-picker-wrap">
+        <button className="call-bar-btn" title="Send a reaction">😊</button>
+        <div className="emote-picker">
+          {EMOTE_SET.map(em => (
+            <button key={em} className="emote-picker-btn" onClick={() => sendEmote(em)} aria-label={`React with ${em}`}>{em}</button>
+          ))}
+        </div>
+      </div>
+      <button className={`call-bar-btn ${muted ? "muted" : "on"}`} onClick={toggleMute} title={muted ? "Unmute" : "Mute"}>{muted ? "🔇" : "🎙"}</button>
+      <button className="call-bar-btn hangup" onClick={close} title="Leave call">☎</button>
+    </div>
+  );
 }
 
 function notificationText(n) {
@@ -1805,6 +2158,7 @@ function notificationText(n) {
     case "mention": return `${who} tagged you in a comment on "${n.data?.mangaTitle || "a series"}"${n.data?.chapterNumber ? `, Ch. ${n.data.chapterNumber}` : ""}`;
     case "recommend": return `${who} recommended "${n.data?.seriesTitle || "a series"}" to you`;
     case "message": return `${who} sent you a message`;
+    case "group_invite": return `${who} added you to "${n.data?.groupName || "a group"}"`;
     default: return "New notification";
   }
 }
